@@ -67,7 +67,7 @@ folders using Python's `os` and `shutil` modules.
 
 - **NFR-A1:** Organizer logic (scan/move/report) must work **without TensorFlow installed** (pure stdlib) so QA can test file handling anywhere.
 - **NFR-A2:** Path-traversal-safe category names — only sanitized, allow-listed categories accepted.
-- **NFR-A3:** Idempotent: re-running with an empty inbox leaves the output tree byte-identical; **zero writes ever occur outside the output root**; a restored inbox re-files via FR-A5 suffixing, never overwrites.
+- **NFR-A3:** Idempotent: re-running with an empty inbox leaves the output tree byte-identical; **zero writes ever occur outside the output root** — excepting the trained-model artifact written by `--train` under `models/` (FR-A9; spine AD-11/AD-13); a restored inbox re-files via FR-A5 suffixing, never overwrites.
 - **NFR-A4:** All config (paths, threshold, backend, model artifact) overridable via CLI flags — including `--model-path`.
 - **NFR-A5:** **Environment:** Python **3.13**, managed project-locally by `uv` (system Python untouched); **stable TensorFlow 2.21.x** (verified 2026-09-27: no stable TF wheel exists for Python 3.14 — the earlier `<2.20` pin is retired). Organizer and tests remain TF-free (NFR-A1).
 
