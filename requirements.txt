@@ -1,0 +1,9 @@
+# Meme & Reaction Image Organizer — dependencies
+
+# --- Classification backends (BMAD Dev phase) ---
+tensorflow>=2.15,<2.20   # MobileNetV2 + custom CNN backends (FR-A2)
+numpy>=1.24
+pillow>=10.0             # image loading/preprocessing
+
+# --- Tooling ---
+pytest>=8.0              # QA Agent test suite
