@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>PRD Validation: Meme &amp; Reaction Image Organizer</title>
+<style>
+  :root {
+    --bg: #fafaf9;
+    --surface: #ffffff;
+    --border: #e7e5e4;
+    --text: #1c1917;
+    --muted: #78716c;
+    --verdict-strong: #16a34a;
+    --verdict-adequate: #65a30d;
+    --verdict-thin: #d97706;
+    --verdict-broken: #dc2626;
+    --sev-low: #64748b;
+    --sev-medium: #ca8a04;
+    --sev-high: #ea580c;
+    --sev-critical: #dc2626;
+    --grade-exc: #16a34a;
+    --grade-good: #65a30d;
+    --grade-fair: #d97706;
+    --grade-poor: #dc2626;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    font-size: 15px;
+  }
+  .container { max-width: 960px; margin: 0 auto; padding: 32px 24px 64px; }
+  header.report-header {
+    display: flex; align-items: flex-start; justify-content: space-between;
+    gap: 24px; padding-bottom: 16px; border-bottom: 1px solid var(--border); margin-bottom: 24px;
+  }
+  .title h1 { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -0.01em; }
+  .title .subtitle { color: var(--muted); font-size: 13px; margin-top: 4px; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+  .grade { padding: 10px 18px; border-radius: 8px; font-weight: 600; color: white; font-size: 15px; white-space: nowrap; }
+  .grade-excellent { background: var(--grade-exc); }
+  .grade-good { background: var(--grade-good); }
+  .grade-fair { background: var(--grade-fair); }
+  .grade-poor { background: var(--grade-poor); }
+  .synthesis {
+    background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--muted);
+    border-radius: 8px; padding: 18px 22px; margin-bottom: 24px; font-size: 15.5px;
+  }
+  .synthesis p { margin: 0 0 10px; }
+  .synthesis p:last-child { margin-bottom: 0; }
+  .dimension-summary {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 10px; margin-bottom: 24px;
+  }
+  .dim-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; }
+  .dim-card .dim-name { font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+  .dim-card .dim-verdict { font-size: 14px; font-weight: 600; }
+  section.dimension, section.reviewer-section { margin-bottom: 14px; }
+  section.dimension details, section.reviewer-section details {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 8px; overflow: hidden;
+  }
+  section summary {
+    padding: 14px 20px; cursor: pointer; user-select: none; list-style: none;
+    display: flex; align-items: center; gap: 12px;
+  }
+  section summary::-webkit-details-marker { display: none; }
+  section summary::before {
+    content: "▸"; display: inline-block; color: var(--muted);
+    transition: transform 0.15s ease;
+  }
+  section details[open] summary::before { transform: rotate(90deg); }
+  section summary h2 { display: inline; margin: 0; font-size: 16px; font-weight: 600; letter-spacing: -0.005em; flex: 1; }
+  .verdict-pill {
+    font-size: 11px; padding: 3px 10px; border-radius: 999px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.04em; color: white;
+  }
+  .verdict-strong { background: var(--verdict-strong); }
+  .verdict-adequate { background: var(--verdict-adequate); }
+  .verdict-thin { background: var(--verdict-thin); }
+  .verdict-broken { background: var(--verdict-broken); }
+  .dim-body { padding: 4px 20px 18px; }
+  .dim-judgment { color: var(--text); font-size: 14.5px; }
+  .dim-judgment p { margin: 0 0 10px; }
+  .findings-list { padding: 0 20px 4px; }
+  article.finding { padding: 14px 0; border-top: 1px solid var(--border); }
+  article.finding:first-child { border-top: none; }
+  article.finding header { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; }
+  .badge {
+    font-size: 10.5px; padding: 3px 8px; border-radius: 4px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.04em; line-height: 1.4;
+  }
+  .badge-sev-low { background: rgba(100, 116, 139, 0.12); color: var(--sev-low); }
+  .badge-sev-medium { background: rgba(202, 138, 4, 0.14); color: var(--sev-medium); }
+  .badge-sev-high { background: rgba(234, 88, 12, 0.14); color: var(--sev-high); }
+  .badge-sev-critical { background: rgba(220, 38, 38, 0.14); color: var(--sev-critical); }
+  .finding-title { margin: 0; font-size: 15px; font-weight: 500; flex: 1; min-width: 200px; }
+  .finding-location { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12.5px; color: var(--muted); }
+  .finding-note, .finding-fix { margin-top: 6px; font-size: 14px; }
+  .finding-fix strong { color: var(--muted); font-weight: 500; }
+  .reviewer-source { font-size: 12px; color: var(--muted); font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+  .mechanical {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+    padding: 16px 20px; margin-top: 24px; font-size: 14px;
+  }
+  .mechanical h3 { margin: 0 0 10px; font-size: 14px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+  .mechanical ul { margin: 0; padding-left: 20px; }
+  .mechanical li { margin-bottom: 4px; color: var(--text); }
+  footer.report-footer {
+    margin-top: 40px; padding-top: 16px; border-top: 1px solid var(--border);
+    font-size: 12px; color: var(--muted); font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  footer .meta { display: flex; gap: 24px; flex-wrap: wrap; }
+</style>
+</head>
+<body>
+  <div class="container">
+
+    <header class="report-header">
+      <div class="title">
+        <h1>Meme &amp; Reaction Image Organizer — Validation Report</h1>
+        <div class="subtitle">docs/product-requirements.md</div>
+      </div>
+      <div class="grade grade-poor">Poor</div>
+    </header>
+
+    <div class="synthesis">
+      <p><strong>Adequate.</strong> This is a tight, honest capability spec that fits its academic CLI brief: concrete FRs with named mechanisms (<code>shutil.move</code>, <code>os.makedirs</code>, exit codes), product-specific NFRs (stdlib-only organizer, path-traversal allow-list), a Non-Goals section that does real work, and a lab-reference traceability table built for the professor Q&A it names. What's at risk is the center of the product: FR-A2 claims to "classify meme templates / reaction styles" using an ImageNet classifier whose label space contains none of the five categories, and neither that mapping nor the FR-A3 confidence threshold value appears anywhere in the PRD — it was resolved silently in <code>system-architecture.md</code> §2.3 without any Open Question or assumption flagged here. Done-ness and scope honesty are the weak dimensions; shape fit and substance are the strengths.</p>
+      <p>The adversarial pass materially shifts the picture: <strong>REJECT — major revision required.</strong> The PRD is currently satisfiable end-to-end with zero machine learning working; its FR-A2 dependency stack (<code>tensorflow&gt;=2.15,&lt;2.20</code>) is verified uninstallable on the committed Python 3.14.6 with no contingency; no acceptance criterion requires classification to actually happen; and the flagship dry-run demo (AC-1) exits 2 in the current environment because dry-run-without-backend behavior is unspecified. Each of these is a defense Q&A kill-shot.</p>
+    </div>
+
+    <div class="dimension-summary">
+      <div class="dim-card"><div class="dim-name">Decision-readiness</div><div class="dim-verdict" style="color: var(--verdict-thin)">thin</div></div>
+      <div class="dim-card"><div class="dim-name">Substance over theater</div><div class="dim-verdict" style="color: var(--verdict-strong)">strong</div></div>
+      <div class="dim-card"><div class="dim-name">Strategic coherence</div><div class="dim-verdict" style="color: var(--verdict-adequate)">adequate</div></div>
+      <div class="dim-card"><div class="dim-name">Done-ness clarity</div><div class="dim-verdict" style="color: var(--verdict-adequate)">adequate</div></div>
+      <div class="dim-card"><div class="dim-name">Scope honesty</div><div class="dim-verdict" style="color: var(--verdict-thin)">thin</div></div>
+      <div class="dim-card"><div class="dim-name">Downstream usability</div><div class="dim-verdict" style="color: var(--verdict-adequate)">adequate</div></div>
+      <div class="dim-card"><div class="dim-name">Shape fit</div><div class="dim-verdict" style="color: var(--verdict-strong)">strong</div></div>
+    </div>
+
+    <section class="dimension">
+      <details open>
+        <summary><h2>Decision-readiness</h2><span class="verdict-pill verdict-thin">thin</span></summary>
+        <div class="dim-body">
+          <div class="dim-judgment">
+            <p>FR-level choices are stated as decisions (selectable backend, <code>--dry-run</code>, collision suffixes, exit codes), so this is not a smooth-to-neutral PRD. But there is not a single Open Question, <code>[NOTE FOR PM]</code>, or <code>[ASSUMPTION]</code> in 77 lines, and the two decisions an engineer would push back on first are exactly the ones dodged: (a) how an ImageNet pre-trained model produces one of five meme categories, and (b) what the confidence threshold actually is. Both were answered downstream in the architecture doc rather than surfaced here. The backend choice is presented as a menu with no default named and no cost stated.</p>
+          </div>
+        </div>
+        <div class="findings-list">
+          <article class="finding">
+            <header><span class="badge badge-sev-medium">medium</span><h3 class="finding-title">No open-items mechanism at real tensions</h3><span class="finding-location">whole PRD; sharpest at §2.3 FR-A2/FR-A3</span></header>
+            <div class="finding-note">Zero Open Questions, <code>[NOTE FOR PM]</code>, or <code>[ASSUMPTION]</code> callouts anywhere, while the ImageNet→category mapping and the threshold value sit undecided <em>in this document</em>.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Add an Open Questions section with 2–3 entries (mapping rule, default threshold, default backend) plus a <code>[NOTE FOR PM]</code> on FR-A2 marking the mapping as delegated-but-uncertain.</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-low">low</span><h3 class="finding-title">Backend trade-off stated without what's given up</h3><span class="finding-location">§2.3 FR-A2</span></header>
+            <div class="finding-note">"selectable backend" offers two options; the custom CNN's label-pipeline cost and the default selection are unstated.</div>
+            <div class="finding-fix"><strong>Fix:</strong> One sentence: default <code>mobilenet</code> (zero-shot, no training data), <code>custom-cnn</code> requires a user-labelled training folder.</div>
+          </article>
+        </div>
+      </details>
+    </section>
+
+    <section class="dimension">
+      <details>
+        <summary><h2>Substance over theater</h2><span class="verdict-pill verdict-strong">strong</span></summary>
+        <div class="dim-body">
+          <div class="dim-judgment">
+            <p>No personas, no vision boilerplate, no innovation/differentiation section — and for a single-operator academic CLI that absence is correct, not a gap. The content that is present is earned: NFRs are product-specific bounds, not "scalable/secure/reliable" copy — "must work <strong>without TensorFlow installed</strong> (pure stdlib)" (NFR-A1), "Path-traversal-safe category names" (NFR-A2). The five categories in §2.2 are domain-specific, and §4's out-of-scope list names concrete technologies with a reason tied to the defense context. No furniture found; no findings.</p>
+          </div>
+        </div>
+      </details>
+    </section>
+
+    <section class="dimension">
+      <details>
+        <summary><h2>Strategic coherence</h2><span class="verdict-pill verdict-adequate">adequate</span></summary>
+        <div class="dim-body">
+          <div class="dim-judgment">
+            <p>The thesis is inherited rather than argued — the lab reference mandates the shape, and the PRD is coherent around it: problem → FR-A1..A8 → ACs → traceability forms one arc. The weakness is metric choice: the acceptance criteria validate <em>file-handling</em> behavior but nothing validates the <em>classification</em> thesis — no measure of whether an image lands in the right category, and no counter-metric guarding the obvious escape hatch (dump everything into <code>unsorted</code> and every AC still passes).</p>
+          </div>
+        </div>
+        <div class="findings-list">
+          <article class="finding">
+            <header><span class="badge badge-sev-medium">medium</span><h3 class="finding-title">Success criteria don't validate the classification thesis</h3><span class="finding-location">§2.5 AC 1–5</span></header>
+            <div class="finding-note">All five ACs verify plumbing (moves, collisions, skips, pytest); none verifies correct categorization, and no <code>unsorted</code>-rate counter-metric exists.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Add one AC/SM on a small labelled sample (e.g. "≥7 of 10 known images land in their expected category") and a counter-metric bounding the <code>unsorted</code> share.</div>
+          </article>
+        </div>
+      </details>
+    </section>
+
+    <section class="dimension">
+      <details>
+        <summary><h2>Done-ness clarity</h2><span class="verdict-pill verdict-adequate">adequate</span></summary>
+        <div class="dim-body">
+          <div class="dim-judgment">
+            <p>Six of eight FRs are engineer-testable as written: FR-A4/A5 name the mechanism and exact collision form, FR-A6/A7 have observable outputs, FR-A8 enumerates exit codes, FR-A1 lists the six extensions. §2.5 gives five concrete ACs. But it bends in three places: FR-A2's core transformation (image → one of five categories) has no defined mapping or accuracy condition; FR-A3's "confidence threshold" is used but never valued; and FR-A2/FR-A8 have no AC coverage at all.</p>
+          </div>
+        </div>
+        <div class="findings-list">
+          <article class="finding">
+            <header><span class="badge badge-sev-high">high</span><h3 class="finding-title">FR-A2's central operation is undefined in the PRD</h3><span class="finding-location">§1; §2.3 FR-A2</span></header>
+            <div class="finding-note">"MobileNetV2 (pretrained on ImageNet)" cannot emit <code>gym-memes</code>/<code>cat-memes</code>/etc. without a label→category mapping, and none is specified here; the custom CNN is specified only as layer names with no input size, units, or training-data source. The mapping appears only downstream (<code>system-architecture.md</code> §2.3, "Dev Agent TODO"). An engineer cannot state "done" for the product's primary FR from this document.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Specify the mapping rule (ImageNet class → category, default <code>unsorted</code> on unmatched/low-confidence) and one testable condition per backend, or explicitly delegate with a <code>[NOTE FOR PM]</code>.</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-medium">medium</span><h3 class="finding-title">"Confidence threshold" has no value and no AC exercises it</h3><span class="finding-location">§2.3 FR-A3; §2.5</span></header>
+            <div class="finding-note">"anything below the confidence threshold goes to <code>unsorted</code>" leaves the default and range unstated; no AC covers the below-threshold path.</div>
+            <div class="finding-fix"><strong>Fix:</strong> State the default (config constant, flag-overridable per NFR-A4) and add an AC: "an image scoring below threshold lands in <code>unsorted</code> with reason logged."</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-medium">medium</span><h3 class="finding-title">AC coverage gaps for FR-A2 and FR-A8</h3><span class="finding-location">§2.5 vs §2.3</span></header>
+            <div class="finding-note">Nothing accepts "both backends selectable and produce category + confidence" or "exit codes 0/1/2 behave as specified"; architecture §2.3 already relies on exit code 2.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Add ACs: <code>--backend</code> switch accepted and honored; missing TF → exit 2.</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-low">low</span><h3 class="finding-title">NFR-A3 "does no damage" is an adjective</h3><span class="finding-location">§2.4</span></header>
+            <div class="finding-note">Unbounded; "damage" is undefined.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Bound it: "re-run produces an identical tree; zero writes outside the output root."</div>
+          </article>
+        </div>
+      </details>
+    </section>
+
+    <section class="dimension">
+      <details open>
+        <summary><h2>Scope honesty</h2><span class="verdict-pill verdict-thin">thin</span></summary>
+        <div class="dim-body">
+          <div class="dim-judgment">
+            <p>§4 is the strongest scope work in the PRD — an explicit Out of Scope list that does real work, distinguishing lab-reference knowledge from build scope. But the rubric's other honesty instruments are entirely absent: no <code>[ASSUMPTION]</code> tags, no <code>[NOTE FOR PM]</code>, no Open Questions, no Assumptions Index. Several material inferences are left for the reader to make silently — default output location, recursive flag default, where custom-CNN training labels come from, and whether OCR/text reading of memes is in scope at all. Total absence of a mechanism is not forgivable, because the unresolved items were in fact resolved elsewhere.</p>
+          </div>
+        </div>
+        <div class="findings-list">
+          <article class="finding">
+            <header><span class="badge badge-sev-medium">medium</span><h3 class="finding-title">Omissions are inferred, not flagged</h3><span class="finding-location">whole PRD; §2.3–§2.4</span></header>
+            <div class="finding-note">No <code>[ASSUMPTION]</code>/Open Questions/Assumptions Index while reader must infer threshold default, output-dir default, recursion default, training-data source, and OCR stance.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Add an Assumptions Index with 3–4 inline <code>[ASSUMPTION: …]</code> tags and an Open Questions section (one section serves both).</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-low">low</span><h3 class="finding-title">Out of Scope omits the classifier-quality boundary</h3><span class="finding-location">§4</span></header>
+            <div class="finding-note">Lists webcam/YOLO/mobile/web UI but not "no labelled training dataset provided; no minimum accuracy target" — both silently assumed.</div>
+            <div class="finding-fix"><strong>Fix:</strong> One line each in §4.</div>
+          </article>
+        </div>
+      </details>
+    </section>
+
+    <section class="dimension">
+      <details>
+        <summary><h2>Downstream usability</h2><span class="verdict-pill verdict-adequate">adequate</span></summary>
+        <div class="dim-body">
+          <div class="dim-judgment">
+            <p>This PRD is chain-top (feeds <code>system-architecture.md</code> and <code>bmad-plan.md</code>, both of which cite "FR IDs throughout"), so traceability matters more than for a standalone doc, and it mostly delivers: FR-A1..A8 and NFR-A1..A4 are contiguous and unique; every ID in §3 resolves; sibling cross-refs all resolve on disk. What's missing is a glossary, and with it the definition of "confidence threshold" that FR-A3 depends on — an extractor pulling FR-A3 alone gets an undefined parameter. No UJs, correctly.</p>
+          </div>
+        </div>
+        <div class="findings-list">
+          <article class="finding">
+            <header><span class="badge badge-sev-medium">medium</span><h3 class="finding-title">No glossary; key domain nouns under-defined and drifting</h3><span class="finding-location">§2.3 FR-A3; §2.1 vs data layout</span></header>
+            <div class="finding-note">"confidence threshold" is used but never defined; PRD says "user-specified input folder" (§2.1) while the architecture fixes <code>data/inbox/</code> and <code>data/organized/</code>.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Add a 5-term glossary (category, backend, confidence threshold, inbox/input folder, organizer) and align §2.1 wording with the arch paths.</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-low">low</span><h3 class="finding-title">ACs lack IDs though the architecture cites them by ID</h3><span class="finding-location">§2.5; system-architecture.md:80 "(AC-4)"</span></header>
+            <div class="finding-note">PRD numbers them 1–5 with no prefix, so the cross-doc reference only resolves by position.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Rename to <code>AC-A1..AC-A5</code>.</div>
+          </article>
+        </div>
+      </details>
+    </section>
+
+    <section class="dimension">
+      <details>
+        <summary><h2>Shape fit</h2><span class="verdict-pill verdict-strong">strong</span></summary>
+        <div class="dim-body">
+          <div class="dim-judgment">
+            <p>The shape matches the product: a single-operator, academic, CLI capability spec with professor-defense traceability needs — problem, categories, FRs, NFRs, ACs, lab traceability, explicit out-of-scope — and that is precisely the shape it takes. UJs with named protagonists and personas would be overhead here; their absence is deliberate calibration. Brownfield concerns don't apply, and the PRD correctly distinguishes build scope from lab "reference knowledge." No findings.</p>
+          </div>
+        </div>
+      </details>
+    </section>
+
+    <section class="reviewer-section">
+      <details>
+        <summary><h2>Adversarial review</h2><span class="reviewer-source">_bmad-output/planning-artifacts/prds/prd-meme-classifier-2026-09-27/review-adversarial-general.md</span></summary>
+        <div class="dim-body">
+          <div class="dim-judgment">
+            <p><strong>Verdict: REJECT — major revision required.</strong> The PRD is currently satisfiable end-to-end with zero machine learning working, contains at least one self-contradiction between acceptance criteria and implementation/architecture, mandates an FR whose dependency stack cannot be installable under the project's own pinned requirements, and specifies no correctness measure for the classifier it exists to deliver. Each of these is a defense Q&amp;A kill-shot. Environment facts verified 2026-09-27: <code>tensorflow&gt;=2.15,&lt;2.20</code> → <em>No matching distribution</em> on Python 3.14.6; only <code>2.22.0rc0</code> exists for cp314; both backends are stubs; 17 tests cover organizer only.</p>
+          </div>
+        </div>
+        <div class="findings-list">
+          <article class="finding">
+            <header><span class="badge badge-sev-critical">critical</span><h3 class="finding-title">C1 — FR-A2 unconditional, but dependency stack not installable as pinned; no contingency</h3><span class="finding-location">§2.3 FR-A2 · §2.4 NFR-A1 · §4</span></header>
+            <div class="finding-note">FR-A2 requires both backends as functional requirements with no qualifier, yet <code>requirements.txt</code> pins TF &lt;2.20 — verified uninstallable on the committed Python 3.14.6. No fallback backend, no version constraint, no environment requirement, no acceptance path for "backend unavailable": FR-A8's exit code 2 has zero ACs, so a run that exits 2 and does nothing is "compliant". Downstream: the Dev epic for FR-A2 cannot be started until someone picks (a) install the RC, (b) downgrade Python, or (c) change backend — a decision the PRD owns and hasn't made. Defense: "Can you run your classifier right now?" → No. "Your requirements file installs?" → Verified: no.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Resolve the environment/backend decision first — pin a runnable path (Python downgrade → TF 2.19/2.20, explicit RC acceptance, or a non-TF backend) and rewrite FR-A2 accordingly. Nothing else in the Dev phase is estimable until this exists.</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-critical">critical</span><h3 class="finding-title">C2 — No acceptance criterion requires the classifier to classify; all 5 ACs pass with NotImplementedError stubs</h3><span class="finding-location">§2.3 FR-A2, FR-A3 · §2.5 AC 1–5</span></header>
+            <div class="finding-note">AC-1..AC-5 verify dry-run counts, folder allow-listing, collisions, non-image skips, and pytest green. Not one asserts "this cat image ends in <code>cat-memes/</code>". No accuracy/precision/recall requirement anywhere — ironic given the sibling deliverable mandates <code>accuracy_score</code>, <code>classification_report</code>, <code>confusion_matrix</code>. A file-mover with a hardcoded <code>unsorted</code> label satisfies this PRD. QA gets no oracle; epics will encode "tests pass" instead of "classification correct".</div>
+            <div class="finding-fix"><strong>Fix:</strong> Add classification ACs with a measurable oracle — a small labeled fixture set (even 10 hand-picked images) with expected categories and a minimum pass rate; report per-category results like the sibling project.</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-critical">critical</span><h3 class="finding-title">C3 — AC-1 (flagship demo) depends on a loadable backend; dry-run-unavailable behavior unspecified</h3><span class="finding-location">§2.3 FR-A6 · §2.5 AC-1 · §2.4 NFR-A1</span></header>
+            <div class="finding-note">Planned moves require a category, which requires classification; <code>cli.run()</code> loads the backend before organizing, so in the committed environment <code>py main.py data/inbox --dry-run</code> exits 2 with no report. AC-1 is unpassable as written on the machine the project runs on. The PRD nowhere says dry-run must work without TensorFlow, nor how a destination is planned when the backend is down.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Specify dry-run-without-backend semantics in one sentence (report-as-unsorted? placeholder? bail?), then make code, architecture, and AC-1 agree.</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-high">high</span><h3 class="finding-title">H1 — ImageNet → 5 meme categories semantically indefensible; §1 contradicts §4</h3><span class="finding-location">§1 · §2.2 · §2.3 · §3 · §4</span></header>
+            <div class="finding-note">A 1000-class ImageNet label set routed into five cultural categories: shipped mapping shows the rot (<code>monitor → chaotic-screenshots</code>, <code>seashore → wholesome-posts</code>). No minimum coverage or distribution requirement, so 95% landing in <code>unsorted</code> meets every AC. §1 claims the tool "classifies meme templates / reaction styles" while §4 forbids training a meme model — no in-scope mechanism ever learns what a meme is. Traceability row overstates the mapping.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Reconcile §1/§4 (state zero-shot ImageNet+mapping is the honest scope), add minimum coverage / unsorted-rate bounds, and correct §3's wording.</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-high">high</span><h3 class="finding-title">H2 — AC-4 contradicts architecture and implementation on corrupt images: "skipped" vs "moved to unsorted"</h3><span class="finding-location">§2.5 AC-4 · §2.3 FR-A3</span></header>
+            <div class="finding_note finding-note">AC-4 says corrupt images are "logged and skipped" (file stays in inbox); architecture says "land in <code>unsorted</code>/skipped"; the code <em>moves</em> them (any <code>predict()</code> exception → <code>category="unsorted"</code>). Three mutually exclusive readings, no test covers either. Whichever way it resolves, one of {PRD, architecture, code} is wrong.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Pick one disposition, one sentence, then align AC-4, architecture §2.4.5, and <code>cli.py</code>.</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-high">high</span><h3 class="finding-title">H3 — custom-cnn unimplementable as specified</h3><span class="finding-location">§2.3 FR-A2 · §2.4 NFR-A4 · §4</span></header>
+            <div class="finding-note">No training workflow whatsoever: no <code>--train</code>/labeling FR, no data contract, no min dataset, no split/seed/evaluation, no artifact format. NFR-A4 already violated: <code>model_path</code> exists in code but no CLI flag requires it. Circular provenance: the only on-disk labeled tree is <code>data/organized/&lt;category&gt;/</code> — the tool's own output — i.e. training on its own prior guesses. §4's ban on "production-grade" training never defines where user-labeling stops.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Define the training FR (flag, data contract, artifact path, minimum data) or demote custom-cnn to explicitly out-of-scope/deferred — then §3 must say how the lab's CNN requirement is met (architecture demo + smoke train on synthetic data).</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-high">high</span><h3 class="finding-title">H4 — FR-A8 exit codes untraced and contradicted by observed behavior; FR-A7's "errors" don't exist in the report contract</h3><span class="finding-location">§2.3 FR-A7, FR-A8 · §2.5</span></header>
+            <div class="finding-note">No AC mentions an exit code (bmad-plan DoD #1 fails). Partial move failures still return 0; empty dir returns 0 with no report at all, violating FR-A7's "after every run"; <code>NotImplementedError</code> and missing TF both collapse into exit 2. <code>--threshold</code> accepts any float (−1, 9) with no validation. README's documented demo command fails before the program starts (broken Store stub).</div>
+            <div class="finding-fix"><strong>Fix:</strong> Add exit-code ACs, define report error semantics, validate <code>--threshold</code> range.</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-medium">medium</span><h3 class="finding-title">M1 — NFR-A3 (idempotency) has zero ACs and zero tests; duplicate-on-rerun semantics unspecified</h3><span class="finding-location">§2.4 NFR-A3 · §2.5</span></header>
+            <div class="finding-note">Re-importing a restored inbox produces <code>cat-1.jpg</code>, <code>cat-2.jpg</code> duplicates — is that "no damage"? "Run it twice" is the most common professor demo; this NFR is untested and ambiguous.</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-medium">medium</span><h3 class="finding-title">M2 — Confidence semantics undefined; §2.2 and FR-A3 disagree on what unsorted means</h3><span class="finding-location">§2.2 · §2.3 FR-A3</span></header>
+            <div class="finding-note">High-confidence-but-unrecognized labels (0.95 confidence, not in mapping) are handled by neither clause. Default threshold 0.45 lives in code, not the PRD; what the score measures is never defined — FR-A3 is not testable.</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-medium">medium</span><h3 class="finding-title">M3 — FR-A7 promises "errors" the report cannot express</h3><span class="finding-location">§2.3 FR-A7</span></header>
+            <div class="finding-note">Report tracks planned/moved/skipped only; skips conflate policy rejections, missing sources, and <code>OSError</code> failures. No error count, no refused-vs-failed distinction. Not implemented, not testable.</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-medium">medium</span><h3 class="finding-title">M4 — Destructive moves with no persisted manifest, no undo — NFR-A3 unverifiable</h3><span class="finding-location">§2.3 FR-A4 · §2.4 NFR-A3</span></header>
+            <div class="finding-note"><code>shutil.move</code> relocates originals; the audit trail is printed and discarded. "What happens when it files 200 images wrong?" has no PRD answer — no run manifest (source → destination → category → confidence) is required anywhere.</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-medium">medium</span><h3 class="finding-title">M5 — Status board and PRD status stale relative to actual implementation</h3><span class="finding-location">PRD header; bmad-plan §2</span></header>
+            <div class="finding-note">Organizer + CLI + 17 tests shipped, README says so, yet bmad-plan Phase 4 is "Pending". Epics and sprint planning derived from this board will mis-scope remaining work (the backend decision <em>is</em> the real Phase 4).</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-medium">medium</span><h3 class="finding-title">M6 — §3 traceability table partial and misquotes the lab reference</h3><span class="finding-location">§3</span></header>
+            <div class="finding-note">Row 2 claims the lab specifies "categorical cross-entropy"; verbatim lab text says "binary <em>or</em> categorical". Row 1 overstates the ImageNet mapping (H1). FR-A1, A5–A8 have no row at all.</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-low">low</span><h3 class="finding-title">L1 — "Image file" is extension-only; adversarial cases live in architecture, not in the PRD's ACs</h3><span class="finding-location">§2.3 FR-A1 · §2.5 AC-4</span></header>
+            <div class="finding-note">Zero-byte images, unicode filenames, permission-denied moves, <code>.jpg</code>-that-is-text appear only in architecture §3's QA table — so "adversarial cases covered" (bmad-plan DoD #4) is unanchored in requirements.</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-low">low</span><h3 class="finding-title">L2 — AC-5's literal command doesn't run in this environment</h3><span class="finding-location">§2.5 AC-5</span></header>
+            <div class="finding-note">Bare <code>pytest</code> is not installed in the <code>py</code> env. A grader following AC-5 verbatim gets command-not-found.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Specify the invocation (<code>uv run --with pytest pytest -q</code>).</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-low">low</span><h3 class="finding-title">L3 — Filesystem edge cases unaddressed</h3><span class="finding-location">§2.3 FR-A4, FR-A5</span></header>
+            <div class="finding-note">Cross-device <code>shutil.move</code> partial failure, NTFS 260-char paths, Windows reserved names (<code>CON.jpg</code>), symlinks in inbox — none acknowledged as accepted risks.</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-low">low</span><h3 class="finding-title">L4 — Folder-name deviation from the lab prompt tracked outside the PRD</h3><span class="finding-location">§1 · §4</span></header>
+            <div class="finding-note">Kickoff prompt specified <code>meme_classifier/</code>; build uses <code>meme-classifier/</code>. <code>bmad-plan.md</code> §5 logs the conflict; the document a grader reads for scope is silent.</div>
+          </article>
+        </div>
+      </details>
+    </section>
+
+    <div class="mechanical">
+      <h3>Mechanical notes</h3>
+      <ul>
+        <li><strong>ID continuity:</strong> FR-A1..A8 and NFR-A1..A4 contiguous, unique, no duplicates or gaps. All §3 cross-refs resolve. Only break: ACs unnumbered as IDs while <code>system-architecture.md:80</code> cites "AC-4".</li>
+        <li><strong>Glossary:</strong> None present; drift between PRD's "input folder" (§2.1) and arch's <code>inbox/</code>; "confidence threshold" undefined.</li>
+        <li><strong>Assumptions Index roundtrip:</strong> N/A — no inline <code>[ASSUMPTION]</code> tags exist to index (this absence is itself a Scope honesty finding).</li>
+        <li><strong>UJ protagonist naming:</strong> N/A — no UJs, appropriate for capability-spec shape.</li>
+        <li><strong>Required sections:</strong> Present: Overview, Problem, FRs, NFRs, Acceptance, Traceability, Out of Scope. Absent: Open Questions, Assumptions, Vision/thesis (acceptable at this stake level).</li>
+        <li><strong>External refs verified:</strong> <code>../spam-detector/docs/</code> and <code>../PROMPTS_LOG.md</code> both resolve from repo root; header metadata complete.</li>
+      </ul>
+    </div>
+
+    <footer class="report-footer">
+      <div class="meta">
+        <span>Rubric: .agents/skills/bmad-prd/assets/prd-validation-checklist.md</span>
+        <span>Generated: 2026-09-27T18:16:09+08:00</span>
+      </div>
+    </footer>
+  </div>
+</body>
+</html>
