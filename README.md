@@ -72,5 +72,5 @@ meme-classifier/
 
 ```bash
 cd meme-classifier
-python -m pytest -q
+uv run --with pytest pytest -q
 ```
