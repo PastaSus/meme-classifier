@@ -1,0 +1,64 @@
+# STATUS DEFINITIONS:
+# ==================
+# Epic Status:
+#   - backlog: Epic not yet started
+#   - in-progress: Epic actively being worked on
+#   - done: All stories in epic completed
+
+# Story Status:
+#   - backlog: Story only exists in epic file
+#   - ready-for-dev: Story file created, ready for development
+#   - in-progress: Developer actively working on implementation
+#   - review: Implementation complete, ready for review
+#   - done: Story completed
+
+# Retrospective Status:
+#   - optional: Can be completed but not required
+#   - done: Retrospective has been completed
+
+# Action Item Status:
+#   - open: Committed during a retrospective, not yet addressed
+#   - in-progress: Actively being worked on
+#   - done: Completed
+
+# WORKFLOW NOTES:
+# ===============
+# - Epic transitions to 'in-progress' automatically when its first story starts (via build's sprint sync)
+# - Stories can be worked in parallel if team capacity allows
+# - Developer typically creates the next story after the previous one is 'done' to incorporate learnings
+# - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
+# - Retrospective appends its action items to action_items; the status view surfaces open ones
+generated: 09-27-2026 19:44
+last_updated: 09-27-2026 19:44
+project: meme-classifier
+project_key: NOKEY
+tracking_system: file-system
+story_location: _bmad-output/implementation-artifacts
+development_status:
+  epic-1: backlog
+  1-1-provision-the-uv-environment: backlog
+  1-2-establish-config-py-single-source-of-truth: backlog
+  1-3-reconcile-the-cli-surface-to-prd-2-1: backlog
+  1-4-scan-and-validate-the-inbox-fr-a1: backlog
+  epic-1-retrospective: optional
+
+  epic-2: backlog
+  2-1-classifier-contract-and-backend-selection: backlog
+  2-2-mobilenetv2-backend-with-shipped-mapping: backlog
+  2-3-confidence-threshold-and-category-normalization: backlog
+  epic-2-retrospective: optional
+
+  epic-3: backlog
+  3-1-collision-free-filing-fr-a4-fr-a5: backlog
+  3-2-report-contract-with-reasons-fr-a7: backlog
+  3-3-run-lifecycle-and-exit-codes-fr-a8: backlog
+  3-4-dry-run-that-touches-nothing-fr-a6: backlog
+  3-5-fixture-accuracy-and-calibrated-floors: backlog
+  3-6-idempotency-and-tf-free-qa-suite-nfr-a1-nfr-a3: backlog
+  epic-3-retrospective: optional
+
+  epic-4: backlog
+  4-1-training-lifecycle-fr-a9: backlog
+  4-2-custom-cnn-backend-via-model-path-fr-a2-nfr-a4: backlog
+  4-3-demo-readiness-and-oq-calibration: backlog
+  epic-4-retrospective: optional
