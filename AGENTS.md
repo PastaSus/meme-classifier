@@ -1,5 +1,5 @@
 <!-- bmad:context -->
-<!-- Verified 2026-09-27 against 0d649be. Managed by bmad-project-context; edits inside this block are replaced on refresh. Keep anything you want preserved outside the markers. -->
+<!-- Verified 2026-09-27 against 5bee309. Managed by bmad-project-context; edits inside this block are replaced on refresh. Keep anything you want preserved outside the markers. -->
 
 ## meme-classifier
 
@@ -8,6 +8,7 @@ University case-study CLI: scans a folder of images, classifies meme/reaction pi
 ## Policy
 
 - Log every AI prompt verbatim in `../PROMPTS_LOG.md` — append-only, never rewrite or delete entries (course requirement).
+- Story branches are `feature/<story-key>-<slug>` (e.g. `feature/1-1-provision-the-uv-environment`); commits are atomic Conventional Commits (`type(scope): subject`).
 
 ## Where things are
 
