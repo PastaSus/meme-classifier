@@ -1,9 +1,0 @@
-# Meme & Reaction Image Organizer — dependencies
-
-# --- Classification backends (BMAD Dev phase) ---
-tensorflow>=2.21,<2.22   # stable TF 2.21.x on project-local Python 3.13 (NFR-A5; FR-A2, FR-A9)
-numpy>=1.26
-pillow>=10.0             # image loading/preprocessing
-
-# --- Tooling ---
-pytest>=8.0              # QA Agent test suite
