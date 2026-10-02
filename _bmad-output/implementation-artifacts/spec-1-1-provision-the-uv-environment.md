@@ -2,8 +2,9 @@
 title: 'Story 1.1: Provision the uv environment'
 type: 'chore'
 created: '2026-09-27'
-status: 'ready-for-dev'
+status: 'done'
 route: 'dispatch'
+baseline_commit: '96c63c6bc821f37053545e089d9202cdd6c550d3'
 review_loop_iteration: 0
 context: []
 ---
@@ -45,11 +46,11 @@ context: []
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] `pyproject.toml` -- create with `requires-python = ">=3.13,<3.14"` and the four pinned dependencies -- declares the NFR-A5 stack
-- [ ] `.python-version` -- create pinning `3.13` -- uv resolves the interpreter project-locally
-- [ ] `uv.lock` -- generate via `uv lock` and commit -- re-syncs resolve identically
-- [ ] `requirements.txt` -- delete (uv is canonical; README pip line goes with it) -- single source of truth, no dual pin maintenance
-- [ ] `README.md` -- update setup section to `uv sync` / `uv run` commands only -- fresh-clone story works verbatim
+- [x] `pyproject.toml` -- create with `requires-python = ">=3.13,<3.14"` and the four pinned dependencies -- declares the NFR-A5 stack
+- [x] `.python-version` -- create pinning `3.13` -- uv resolves the interpreter project-locally
+- [x] `uv.lock` -- generate via `uv lock` and commit -- re-syncs resolve identically
+- [x] `requirements.txt` -- delete (uv is canonical; README pip line goes with it) -- single source of truth, no dual pin maintenance
+- [x] `README.md` -- update setup section to `uv sync` / `uv run` commands only -- fresh-clone story works verbatim
 
 **Acceptance Criteria:**
 - Given a fresh clone, when `uv sync` runs, then a project-local `.venv` on Python 3.13.x is created without touching the system interpreter
@@ -59,9 +60,43 @@ context: []
 
 ## Implementation Notes
 
+- 2026-10-02: `uv lock` resolved `tensorflow>=2.21,<2.22` to 2.21.0 on Windows — TF Windows-wheel risk did NOT materialize, no stop-for-human needed. `uv sync` x2 identical (38 packages, no changes). `uv run python --version` = 3.13.14. `uv run --with pytest pytest -q` = 17 passed. `organizer.py`/`cli.py`/`config.py` verified stdlib-only (TF mentions are comments). Branch `feature/1-1-provision-the-uv-environment` used per AGENTS.md policy (spec frozen text says `story/1-1-...`; kept existing `feature/` branch).
+
 ## Spec Change Log
 
+- 2026-10-02 (step-04 review, iteration 0): no subagent runtime in this host,
+  so the three review layers were executed inline per the step-04 fallback
+  (child-prompt-to-human) intent: blind-hunter N-arithmetic, edge-case path
+  enumeration, verification-gap trace. No loopback triggered; code untouched.
+
 ## Review Triage Log
+
+- 2026-10-02 (step-04 inline, no subagent runtime — see Spec Change Log): blind-hunter
+  arithmetic N = min(floor(sqrt(540) + 1), 10) ≈ 10 candidates traced; edge-case
+  path enumeration over pyproject/.python-version/README/requirements-deletion;
+  verification-gap trace over the 17-test organizer suite. Verdicts:
+  - `false` — pytest as runtime dep (not dev/optional): spec frozen-boundary
+    command is `uv run --with pytest pytest -q`; `uv sync` resolution verified
+    identical x2 (38 packages, no changes). No bad outcome observed.
+  - `false` — TF Windows-wheel risk: `uv lock` resolved TF 2.21.0 on this
+    machine; risk recorded in Implementation Notes as not materialized. The
+    Design Notes rule fired correctly (record + proceed, no silent pin change).
+  - `false` — README `python main.py` vs `uv run`: Usage examples are owned by
+    Story 1.3 per frozen Never-boundary; setup section correctly uses
+    `uv sync`/`uv run`. Out of story scope by intent, not by omission.
+  - `low → rejected` — `pytest>=8.0` floor unpinned-upper: everyday use meets
+    no defect (lockfile pins exact version); fix would add constraint
+    complexity beyond this story's single-source-of-truth goal.
+  - `low → rejected` — no `requires-dist` platform guard for TF-on-Windows
+    future breakage: lock proved resolution here; guard would add
+    spec-unowned surface (PRD owns the pin value).
+  - `defer` — stray repo-root file `C:Users...opencodespec-1-1-diff.txt`
+    (opencode temp dump, ~74KB): pre-existing workspace hygiene, not caused by
+    the spec's task list; deleted during review, no repo content affected.
+- Result: no intent_gap, no bad_spec, no patch. ACs verified:
+  `uv run python --version` = 3.13.14; `uv run --with pytest pytest -q` =
+  17 passed; `uv sync` x2 identical; `pyproject.toml` + `uv.lock` committed;
+  stdlib-only modules untouched.
 
 ## Design Notes
 
