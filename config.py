@@ -38,3 +38,40 @@ CONFIDENCE_THRESHOLD = 0.45
 
 # Collision-safety cap for duplicate filenames (FR-A5).
 MAX_COLLISION_SUFFIX = 1000
+
+# Training artifact default (AD-11): the only literal model path in the repo.
+# `classifier` receives it as a constructor argument; no other module declares it.
+DEFAULT_MODEL_PATH = BASE_DIR / "models" / "custom-cnn.keras"
+
+# Labelled-fixture default for AC-A6/AC-A7 accuracy checks (AD-12).
+DEFAULT_FIXTURE_DIR = BASE_DIR / "tests" / "fixtures" / "labeled"
+
+# Placement-accuracy floors (OQ-1 first-pass values; Tech Lead calibrates later).
+# AC-A6: accuracy on a labelled fixture must be >= ACCURACY_FLOOR.
+# AC-A7 (counter-metric): unsorted share must be <= UNSORTED_SHARE_FLOOR.
+ACCURACY_FLOOR = 0.6
+UNSORTED_SHARE_FLOOR = 0.8
+
+# --- Label mapping for the ImageNet backend -----------------------------------
+# ImageNet class name (lowercase) -> project category (kebab-case, FR-A2).
+# Single home for the mapping (AD-3): `classifier` imports it, never re-declares
+# it; no on-disk mapping file exists. Unmapped labels route to "unsorted".
+IMAGENET_LABEL_TO_CATEGORY: dict[str, str] = {
+    # gym-memes
+    "barbell": "gym-memes",
+    "dumbbell": "gym-memes",
+    # cat-memes
+    "tabby": "cat-memes",
+    "tiger_cat": "cat-memes",
+    "persian_cat": "cat-memes",
+    "siamese_cat": "cat-memes",
+    "egyptian_cat": "cat-memes",
+    "lynx": "cat-memes",
+    # chaotic-screenshots (desktop/screen imagery — extend in Dev phase)
+    "desktop_computer": "chaotic-screenshots",
+    "monitor": "chaotic-screenshots",
+    # wholesome-posts (warm/cozy imagery — extend in Dev phase)
+    "teddy": "wholesome-posts",
+    "toyshop": "wholesome-posts",
+    "seashore": "wholesome-posts",
+}

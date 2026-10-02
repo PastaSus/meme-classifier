@@ -18,6 +18,8 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
 
+from config import IMAGENET_LABEL_TO_CATEGORY
+
 logger = logging.getLogger(__name__)
 
 DEV_TODO = "[DEV Agent TODO — BMAD Phase 4]"
@@ -49,28 +51,10 @@ class BaseClassifier(ABC):
 
 
 # --- Label mapping for the ImageNet backend ---------------------------------
-# ImageNet class name (lowercase) -> project category (kebab-case, FR-A2).
-# Extend this table during the Dev phase; unmapped labels below still route to
-# "unsorted" via the confidence threshold in cli.py (FR-A3).
-IMAGENET_LABEL_TO_CATEGORY: dict[str, str] = {
-    # gym-memes
-    "barbell": "gym-memes",
-    "dumbbell": "gym-memes",
-    # cat-memes
-    "tabby": "cat-memes",
-    "tiger_cat": "cat-memes",
-    "persian_cat": "cat-memes",
-    "siamese_cat": "cat-memes",
-    "egyptian_cat": "cat-memes",
-    "lynx": "cat-memes",
-    # chaotic-screenshots (desktop/screen imagery — extend in Dev phase)
-    "desktop_computer": "chaotic-screenshots",
-    "monitor": "chaotic-screenshots",
-    # wholesome-posts (warm/cozy imagery — extend in Dev phase)
-    "teddy": "wholesome-posts",
-    "toyshop": "wholesome-posts",
-    "seashore": "wholesome-posts",
-}
+# Home: `config.IMAGENET_LABEL_TO_CATEGORY` (AD-3 single source of truth).
+# Re-exported here so existing `classifier.IMAGENET_LABEL_TO_CATEGORY` imports
+# keep working; the table itself is declared once, in `config.py`.
+IMAGENET_LABEL_TO_CATEGORY = IMAGENET_LABEL_TO_CATEGORY
 
 
 class MobileNetV2Classifier(BaseClassifier):
