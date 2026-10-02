@@ -80,13 +80,14 @@ def _has_hidden_part(root: Path, path: Path) -> bool:
 
 def scan_images(
     input_dir: Path,
-    recursive: bool = True,
+    recursive: bool = False,
     exclude: Path | None = None,
 ) -> list[Path]:
     """Return sorted image paths under *input_dir* (FR-A1).
 
-    Non-image files, hidden files/directories, and anything under *exclude*
-    (typically the output root) are ignored.
+    Recursion is OFF by default — `-r` opts in (PRD 2.1). Non-image files,
+    hidden files/directories, and anything under *exclude* (typically the
+    output root) are ignored.
     """
     root = Path(input_dir).resolve()
     if not root.is_dir():

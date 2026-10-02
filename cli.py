@@ -8,6 +8,7 @@ import argparse
 import logging
 import sys
 from collections.abc import Sequence
+from pathlib import Path
 
 from classifier import get_classifier
 from config import (
@@ -136,17 +137,21 @@ def _print_report(report: OrganizeReport, dry_run: bool) -> None:
 
 
 def run(args: argparse.Namespace) -> int:
-    # Compat shim: old attribute names from the drift surface still work if any
-    # caller constructs them (removed in this story, kept readable until 1.4).
-    output = getattr(args, "output", getattr(args, "output_dir", None))
-    recursive = getattr(args, "recursive", not getattr(args, "no_recursive", True))
-    paths = scan_images(
-        args.input_dir,
-        recursive=recursive,
-        exclude=output,
-    )
+    # Path validation lives here, before any filesystem side effect (Story 1.4,
+    # FR-A1): a missing inbox exits 1 without creating the output tree.
+    input_dir = Path(args.input_dir)
+    if not input_dir.is_dir():
+        logger.error("Input directory does not exist: %s", input_dir.resolve())
+        return 1
+
+    output = Path(args.output)
+    if output.exists() and not output.is_dir():
+        logger.error("Output path is not a directory: %s", output.resolve())
+        return 1
+
+    paths = scan_images(input_dir, recursive=args.recursive, exclude=output)
     if not paths:
-        print(f"No images found in {args.input_dir}")
+        print(f"No images found in {input_dir}")
         return 0
 
     print(f"Scanned {len(paths)} image(s) from {args.input_dir}")
