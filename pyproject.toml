@@ -1,0 +1,12 @@
+[project]
+name = "meme-classifier"
+version = "0.1.0"
+description = "Meme & Reaction Image Organizer — university case-study CLI"
+readme = "README.md"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+  "tensorflow>=2.21,<2.22",
+  "numpy>=1.26",
+  "pillow>=10.0",
+  "pytest>=8.0",
+]
