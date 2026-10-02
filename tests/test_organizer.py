@@ -36,20 +36,27 @@ class TestScanImages:
 
         assert [p.name for p in found] == ["a.jpg", "b.PNG"]
 
-    def test_recursive_and_exclude(self, tmp_path: Path) -> None:
+    def test_recursion_is_off_by_default(self, tmp_path: Path) -> None:
         inbox = tmp_path / "inbox"
-        out = tmp_path / "organized"
         _touch(inbox / "top.jpg")
         _touch(inbox / "nested" / "deep.jpg")
+
+        flat = scan_images(inbox)
+        recursive = scan_images(inbox, recursive=True)
+
+        # PRD 2.1: `-r` opts into subfolders, plain scan stays top-level.
+        assert [p.name for p in flat] == ["top.jpg"]
+        assert len(recursive) == 2
+
+    def test_exclude_skips_output_tree(self, tmp_path: Path) -> None:
+        inbox = tmp_path / "inbox"
+        out = inbox / "organized"
+        _touch(inbox / "top.jpg")
         _touch(out / "cat-memes" / "already.jpg")
 
-        recursive = scan_images(inbox)
-        flat = scan_images(inbox, recursive=False)
-        excluded = scan_images(inbox, exclude=out)
+        found = scan_images(inbox, recursive=True, exclude=out)
 
-        assert len(recursive) == 2
-        assert [p.name for p in flat] == ["top.jpg"]
-        assert len(excluded) == 2  # out/ is outside inbox, nothing to exclude
+        assert [p.name for p in found] == ["top.jpg"]
 
     def test_missing_directory_raises(self, tmp_path: Path) -> None:
         with pytest.raises(NotADirectoryError):
