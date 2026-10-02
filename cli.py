@@ -13,13 +13,30 @@ from classifier import get_classifier
 from config import (
     CONFIDENCE_THRESHOLD,
     DEFAULT_BACKEND,
+    DEFAULT_FIXTURE_DIR,
     DEFAULT_INPUT_DIR,
+    DEFAULT_MODEL_PATH,
     DEFAULT_OUTPUT_DIR,
     MODEL_BACKENDS,
 )
 from organizer import OrganizeJob, OrganizeReport, organize, scan_images
 
 logger = logging.getLogger("meme-organizer")
+
+
+def _threshold(value: str) -> float:
+    """Argparse value-shape validation for --threshold: must be in (0, 1].
+
+    Path existence stays in cli.run (exit 1); this owns shape only (AD-8).
+    argparse failures exit 2 per its default (AD-8 usage-error semantics).
+    """
+    try:
+        parsed = float(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"threshold must be in (0, 1], got {value!r}")
+    if not 0 < parsed <= 1:
+        raise argparse.ArgumentTypeError(f"threshold must be in (0, 1], got {value!r}")
+    return parsed
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -39,7 +56,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "-o",
-        "--output-dir",
+        "--output",
         type=str,
         default=str(DEFAULT_OUTPUT_DIR),
         help=f"root folder for category subfolders (default: {DEFAULT_OUTPUT_DIR})",
@@ -54,9 +71,27 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "-t",
         "--threshold",
-        type=float,
+        type=_threshold,
         default=CONFIDENCE_THRESHOLD,
         help="confidence below which images go to 'unsorted' (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--fixture",
+        type=str,
+        default=str(DEFAULT_FIXTURE_DIR),
+        help=f"labelled fixture root for accuracy checks (default: {DEFAULT_FIXTURE_DIR})",
+    )
+    parser.add_argument(
+        "--train",
+        type=str,
+        default=None,
+        help="train the custom CNN on a labeled folder tree before organizing",
+    )
+    parser.add_argument(
+        "--model-path",
+        type=str,
+        default=str(DEFAULT_MODEL_PATH),
+        help=f"custom-cnn artifact path (default: {DEFAULT_MODEL_PATH})",
     )
     parser.add_argument(
         "--dry-run",
@@ -64,9 +99,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="print planned moves without touching the filesystem (FR-A6)",
     )
     parser.add_argument(
-        "--no-recursive",
+        "-r",
+        "--recursive",
         action="store_true",
-        help="only scan the top level of input_dir",
+        help="scan nested subfolders (default: top level only)",
     )
     parser.add_argument(
         "-v",
@@ -100,10 +136,14 @@ def _print_report(report: OrganizeReport, dry_run: bool) -> None:
 
 
 def run(args: argparse.Namespace) -> int:
+    # Compat shim: old attribute names from the drift surface still work if any
+    # caller constructs them (removed in this story, kept readable until 1.4).
+    output = getattr(args, "output", getattr(args, "output_dir", None))
+    recursive = getattr(args, "recursive", not getattr(args, "no_recursive", True))
     paths = scan_images(
         args.input_dir,
-        recursive=not args.no_recursive,
-        exclude=args.output_dir,
+        recursive=recursive,
+        exclude=output,
     )
     if not paths:
         print(f"No images found in {args.input_dir}")
@@ -138,7 +178,7 @@ def run(args: argparse.Namespace) -> int:
             OrganizeJob(source=path, category=category, confidence=result.confidence)
         )
 
-    report = organize(jobs, args.output_dir, dry_run=args.dry_run)  # FR-A4, FR-A6
+    report = organize(jobs, output, dry_run=args.dry_run)  # FR-A4, FR-A6
     _print_report(report, args.dry_run)  # FR-A7
     return 0
 
