@@ -21,7 +21,7 @@ files them into labelled subfolders using Python's `os` and `shutil` modules.
 
 ```bash
 cd meme-classifier
-pip install -r requirements.txt   # organizer + tests run even WITHOUT tensorflow
+uv sync   # organizer + tests run even WITHOUT tensorflow
 ```
 
 ## Usage
@@ -55,7 +55,9 @@ meme-classifier/
 ├── conftest.py      # pytest import bootstrap
 ├── tests/           # QA suite (organizer — no TensorFlow needed)
 ├── data/            # inbox/ + organized/ working folders
-└── requirements.txt
+├── pyproject.toml
+├── uv.lock
+└── .python-version
 ```
 
 ## Implementation status (BMAD)
