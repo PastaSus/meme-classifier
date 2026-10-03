@@ -69,6 +69,26 @@ class BaseClassifier(ABC):
     def predict(self, image_path: Path) -> ClassificationResult:
         """Classify one image file and return category + confidence."""
 
+    def route(
+        self, category: str | None, confidence: float, raw_label: str | None = None
+    ) -> tuple[str, str | None]:
+        """Single routing policy for every backend (AR-9, AD-10, FR-A2, FR-A3).
+
+        Backends resolve their native label first, then pass the mapped
+        category (or None when unmapped) through here. Returns
+        ``(final_category, reason)``: unmapped labels route to ``unsorted``
+        regardless of confidence; below-threshold confidences route to
+        ``unsorted`` with a ``confidence X < Y`` reason; categories outside
+        ``config.CATEGORIES`` are normalized to ``unsorted``.
+        """
+        if category is None:
+            return "unsorted", f"unmapped label {raw_label!r}"
+        if confidence < self.threshold:
+            return "unsorted", f"confidence {confidence:.2f} < {self.threshold:.2f}"
+        if category not in CATEGORIES:
+            return "unsorted", f"unknown category {category!r}"
+        return category, None
+
 
 # --- Label mapping for the ImageNet backend ---------------------------------
 # Home: `config.IMAGENET_LABEL_TO_CATEGORY` (AD-3 single source of truth).
@@ -81,9 +101,8 @@ class MobileNetV2Classifier(BaseClassifier):
     """Lab reference: MobileNetV2 pre-trained on ImageNet.
 
     Strategy: run ImageNet inference, map the top label through
-    IMAGENET_LABEL_TO_CATEGORY, and route unmapped labels to "unsorted" with a
-    reason. Below-threshold handling stays with the caller until Story 2.3 moves
-    it into the classifier layer (AD-10).
+    IMAGENET_LABEL_TO_CATEGORY, then apply the shared ``BaseClassifier.route``
+    policy (unmapped/threshold/membership → "unsorted" with a reason).
     """
 
     name = "mobilenet"
@@ -112,7 +131,7 @@ class MobileNetV2Classifier(BaseClassifier):
         return self
 
     def predict(self, image_path: Path) -> ClassificationResult:
-        """Preprocess → model.predict → top-1 → shipped label mapping."""
+        """Preprocess → model.predict → top-1 → mapping → shared routing."""
         path = Path(image_path)
         if self._model is None or self._preprocess is None or self._decode is None:
             raise PredictFailed("mobilenet backend not loaded (call load() first)")
@@ -138,8 +157,7 @@ class MobileNetV2Classifier(BaseClassifier):
             raise PredictFailed(f"inference failed for {path.name}: {exc}") from exc
 
         category = IMAGENET_LABEL_TO_CATEGORY.get(raw_label)
-        reason = None if category else f"unmapped label {raw_label!r}"
-        final = category or "unsorted"
+        final, reason = self.route(category, confidence, raw_label=raw_label)
         return ClassificationResult(
             image_path=path,
             category=final,
@@ -177,7 +195,10 @@ class CustomCNNClassifier(BaseClassifier):
 
     def predict(self, image_path: Path) -> ClassificationResult:
         # TODO(Dev Agent): resize/normalize image -> model.predict ->
-        #                   argmax over class indices -> category + confidence.
+        #                   argmax over class indices -> category + confidence,
+        #                   then pass the mapped category through
+        #                   BaseClassifier.route (Story 2.3) so threshold and
+        #                   normalization stay in one place for every backend.
         raise NotImplementedError(
             f"{DEV_TODO} Implement inference in CustomCNNClassifier.predict()."
         )
