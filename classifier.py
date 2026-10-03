@@ -18,11 +18,19 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
 
-from config import IMAGENET_LABEL_TO_CATEGORY
+from config import CONFIDENCE_THRESHOLD, IMAGENET_LABEL_TO_CATEGORY, MODEL_BACKENDS
 
 logger = logging.getLogger(__name__)
 
 DEV_TODO = "[DEV Agent TODO — BMAD Phase 4]"
+
+
+class BackendUnavailable(Exception):
+    """Raised when a backend cannot serve (unknown name, TF missing, load fail)."""
+
+
+class PredictFailed(Exception):
+    """Stable predict-stage failure (AD-7): cli converts to unsorted + reason."""
 
 
 @dataclass(frozen=True)
@@ -34,12 +42,18 @@ class ClassificationResult:
     confidence: float  # 0.0 - 1.0
     backend: str
     raw_label: str | None = None  # backend-native label before mapping
+    reason: str | None = None  # why unsorted (low confidence / unmapped / failure)
+    probabilities: tuple[float, ...] = ()  # distribution over config.CATEGORIES
 
 
 class BaseClassifier(ABC):
     """Common contract for every classification backend."""
 
     name: str = "base"
+
+    def __init__(self, threshold: float = CONFIDENCE_THRESHOLD) -> None:
+        """*threshold* is the below-which probability that means `unsorted` (FR-A3)."""
+        self.threshold = threshold
 
     @abstractmethod
     def load(self) -> "BaseClassifier":
@@ -67,7 +81,10 @@ class MobileNetV2Classifier(BaseClassifier):
 
     name = "mobilenet"
 
-    def __init__(self, weights: str = "imagenet") -> None:
+    def __init__(
+        self, weights: str = "imagenet", threshold: float = CONFIDENCE_THRESHOLD
+    ) -> None:
+        super().__init__(threshold=threshold)
         self.weights = weights
         self._model = None
         self._decode = None
@@ -98,7 +115,10 @@ class CustomCNNClassifier(BaseClassifier):
 
     name = "custom-cnn"
 
-    def __init__(self, model_path: Path | None = None) -> None:
+    def __init__(
+        self, model_path: Path | None = None, threshold: float = CONFIDENCE_THRESHOLD
+    ) -> None:
+        super().__init__(threshold=threshold)
         self.model_path = model_path
         self._model = None
 
@@ -124,13 +144,18 @@ _BACKENDS: dict[str, type[BaseClassifier]] = {
 }
 
 
-def get_classifier(backend: str) -> BaseClassifier:
-    """Factory validated against config.MODEL_BACKENDS (FR-A2)."""
-    try:
-        cls = _BACKENDS[backend]
-    except KeyError:
-        raise ValueError(
+def get_classifier(
+    backend: str, threshold: float = CONFIDENCE_THRESHOLD
+) -> BaseClassifier:
+    """Factory validated against config.MODEL_BACKENDS (FR-A2).
+
+    *threshold* flows into the backend so routing stays in one place (AD-10).
+    Names outside the config allow-list raise BackendUnavailable, which the CLI
+    maps to exit 2 instead of a traceback.
+    """
+    if backend not in MODEL_BACKENDS or backend not in _BACKENDS:
+        raise BackendUnavailable(
             f"Unknown backend {backend!r}. Choose from: {sorted(_BACKENDS)}"
-        ) from None
+        )
     logger.debug("Selected backend: %s", backend)
-    return cls()
+    return _BACKENDS[backend](threshold=threshold)
