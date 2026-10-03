@@ -20,7 +20,7 @@ from config import (
     DEFAULT_OUTPUT_DIR,
     MODEL_BACKENDS,
 )
-from organizer import OrganizeJob, OrganizeReport, organize, scan_images
+from organizer import OrganizeJob, OrganizeReport, empty_report, organize, scan_images
 
 logger = logging.getLogger("meme-organizer")
 
@@ -115,25 +115,33 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _print_report(report: OrganizeReport, dry_run: bool) -> None:
-    if not report.records:
+    if report.records:
+        verb = "Planned moves" if dry_run else "Moved files"
+        print(f"\n{verb}:")
+        width = max(len(r.source.name) for r in report.records)
+        for record in report.records:
+            dest = record.destination or "-"
+            confidence = f"{record.confidence * 100:5.1f}%"
+            line = f"  [{record.status:<7}] {record.category:<18} {confidence}  {record.source.name:<{width}} -> {dest}"
+            if record.detail:
+                line += f"  ({record.detail})"
+            print(line)
+    else:
+        # Empty reports still get their zeroed counters below (FR-A7: a
+        # summary prints after every run, including empty inputs).
         print("Nothing to organize.")
-        return
-
-    verb = "Planned moves" if dry_run else "Moved files"
-    print(f"\n{verb}:")
-    width = max(len(r.source.name) for r in report.records)
-    for record in report.records:
-        dest = record.destination or "-"
-        confidence = f"{record.confidence * 100:5.1f}%"
-        line = f"  [{record.status:<7}] {record.category:<18} {confidence}  {record.source.name:<{width}} -> {dest}"
-        if record.detail and record.status == "skipped":
-            line += f"  ({record.detail})"
-        print(line)
 
     print("\nSummary:")
-    print(f"  planned: {report.planned} | moved: {report.moved} | skipped: {report.skipped}")
+    print(
+        f"  planned: {report.planned} | moved: {report.moved} | "
+        f"skipped: {report.skipped} | refused: {report.refused} | failed: {report.failed}"
+    )
     for category, count in report.counts_by_category().items():
         print(f"    {category}: {count}")
+    if report.errors:
+        print("  Errors:")
+        for record in report.errors:
+            print(f"    [{record.status}] {record.source.name}: {record.detail or record.category}")
 
 
 def run(args: argparse.Namespace) -> int:
@@ -152,6 +160,7 @@ def run(args: argparse.Namespace) -> int:
     paths = scan_images(input_dir, recursive=args.recursive, exclude=output)
     if not paths:
         print(f"No images found in {input_dir}")
+        _print_report(empty_report(), args.dry_run)  # AR-7: organizer owns it
         return 0
 
     print(f"Scanned {len(paths)} image(s) from {args.input_dir}")
@@ -172,16 +181,25 @@ def run(args: argparse.Namespace) -> int:
         try:
             result = classifier.predict(path)
         except Exception as exc:
+            # AD-7: convert to a reason-carrying unsorted job and continue —
+            # the reason must reach the report, never live only in the log.
             logger.warning("Classification failed for %s (%s) -> unsorted", path.name, exc)
-            jobs.append(OrganizeJob(source=path, category="unsorted", confidence=0.0))
+            jobs.append(
+                OrganizeJob(
+                    source=path, category="unsorted", confidence=0.0, reason=str(exc)
+                )
+            )
             continue
 
         # FR-A3 lives in the classifier layer now (Story 2.3, AR-4): cli
-        # trusts result.category and never re-routes.
-        # TODO(Story 3.2): carry result.reason into the job/report contract.
+        # trusts result.category and never re-routes. The layer's reason rides
+        # along so successfully filed unsorted images stay explainable (FR-A7).
         jobs.append(
             OrganizeJob(
-                source=path, category=result.category, confidence=result.confidence
+                source=path,
+                category=result.category,
+                confidence=result.confidence,
+                reason=result.reason,
             )
         )
 
