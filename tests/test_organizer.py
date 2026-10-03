@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+import organizer as organizer_mod
 from config import CATEGORIES
 from organizer import (
     STATUS_MOVED,
@@ -85,6 +86,16 @@ class TestUniqueDestination:
     def test_no_collision_returns_original(self, tmp_path: Path) -> None:
         assert unique_destination(tmp_path, "fresh.jpg") == tmp_path / "fresh.jpg"
 
+    def test_suffix_preserves_multi_dot_and_missing_suffix(
+        self, tmp_path: Path
+    ) -> None:
+        _touch(tmp_path / "archive.tar.jpg")
+        assert unique_destination(tmp_path, "archive.tar.jpg") == (
+            tmp_path / "archive.tar-1.jpg"
+        )
+        _touch(tmp_path / "README")
+        assert unique_destination(tmp_path, "README") == tmp_path / "README-1"
+
 
 class TestOrganize:
     def test_moves_into_labelled_subfolder(self, tmp_path: Path) -> None:
@@ -157,3 +168,79 @@ class TestOrganize:
         report = organize(jobs, out, allowed=CATEGORIES)
 
         assert report.counts_by_category() == {"cat-memes": 2, "gym-memes": 1}
+
+    def test_suffix_exhaustion_is_skipped_not_fatal(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        # FR-A5: up to MAX_COLLISION_SUFFIX attempts, then skipped. The cap is
+        # monkeypatched so no 1001-file fixture is needed — after pinning the
+        # production value the story actually ships.
+        assert organizer_mod.MAX_COLLISION_SUFFIX == 1000
+        monkeypatch.setattr(organizer_mod, "MAX_COLLISION_SUFFIX", 2)
+        out = tmp_path / "organized"
+        _touch(out / "cat-memes" / "cat.jpg")
+        _touch(out / "cat-memes" / "cat-1.jpg")
+        _touch(out / "cat-memes" / "cat-2.jpg")
+        src = _touch(tmp_path / "inbox" / "cat.jpg")
+
+        report = organize([OrganizeJob(src, "cat-memes")], out, allowed=CATEGORIES)
+
+        assert report.skipped == 1
+        assert report.records[0].status == STATUS_SKIPPED
+        assert "Could not find a free name" in report.records[0].detail
+        assert src.is_file()  # never destroyed
+
+    def test_only_allow_listed_folders_are_created(self, tmp_path: Path) -> None:
+        # No explicit `allowed`: exercises the default CATEGORIES fallback on
+        # the production call path (cli.run never passes `allowed`).
+        good = _touch(tmp_path / "inbox" / "ok.jpg")
+        evil = _touch(tmp_path / "inbox" / "evil.jpg")
+        out = tmp_path / "organized"
+
+        report = organize(
+            [
+                OrganizeJob(good, "cat-memes", 0.9),
+                OrganizeJob(evil, "../../evil", 0.5),
+            ],
+            out,
+        )
+
+        assert report.moved == 1
+        assert report.skipped == 1
+        assert (out / "cat-memes" / "ok.jpg").is_file()
+        assert sorted(p.name for p in out.iterdir()) == ["cat-memes"]
+        assert sorted(p.name for p in tmp_path.iterdir()) == ["inbox", "organized"]
+        assert evil.is_file()
+
+    def test_intra_batch_collision_is_renamed(self, tmp_path: Path) -> None:
+        # The cli-shaped call: one organize() batch, two same-basename jobs.
+        out = tmp_path / "organized"
+        first = _touch(tmp_path / "inbox" / "one" / "cat.jpg")
+        second = _touch(tmp_path / "inbox" / "two" / "cat.jpg")
+
+        report = organize(
+            [OrganizeJob(first, "cat-memes"), OrganizeJob(second, "cat-memes")],
+            out,
+            allowed=CATEGORIES,
+        )
+
+        assert report.moved == 2
+        assert (out / "cat-memes" / "cat.jpg").is_file()
+        assert (out / "cat-memes" / "cat-1.jpg").is_file()
+        assert not first.exists() and not second.exists()
+
+
+def test_organizer_module_is_stdlib_only() -> None:
+    """NFR-A1: organizer.py must import nothing beyond stdlib + first-party."""
+    import ast
+    import sys
+
+    src = Path(organizer_mod.__file__).read_text(encoding="utf-8")
+    imported: set[str] = set()
+    for node in ast.walk(ast.parse(src)):
+        if isinstance(node, ast.Import):
+            imported.update(alias.name.split(".")[0] for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            imported.add(node.module.split(".")[0])
+    third_party = imported - set(sys.stdlib_module_names) - {"config"}
+    assert third_party == set(), f"non-stdlib imports: {sorted(third_party)}"
