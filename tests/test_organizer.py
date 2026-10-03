@@ -8,10 +8,13 @@ import pytest
 import organizer as organizer_mod
 from config import CATEGORIES
 from organizer import (
+    STATUS_FAILED,
     STATUS_MOVED,
     STATUS_PLANNED,
+    STATUS_REFUSED,
     STATUS_SKIPPED,
     OrganizeJob,
+    empty_report,
     organize,
     sanitize_category,
     scan_images,
@@ -135,15 +138,17 @@ class TestOrganize:
         assert (out / "cat-memes" / "cat.jpg").is_file()
         assert (out / "cat-memes" / "cat-1.jpg").is_file()
 
-    def test_disallowed_category_is_skipped_not_fatal(self, tmp_path: Path) -> None:
+    def test_disallowed_category_is_refused_not_fatal(self, tmp_path: Path) -> None:
         src = _touch(tmp_path / "inbox" / "x.jpg")
 
         report = organize(
             [OrganizeJob(src, "../../evil", 0.5)], tmp_path / "out", allowed=CATEGORIES
         )
 
-        assert report.skipped == 1
-        assert report.records[0].status == STATUS_SKIPPED
+        assert report.refused == 1
+        assert report.skipped == 0
+        assert report.records[0].status == STATUS_REFUSED
+        assert "Category not allowed" in report.records[0].detail
         assert src.is_file()
         assert not (tmp_path / "out").exists()
 
@@ -168,6 +173,64 @@ class TestOrganize:
         report = organize(jobs, out, allowed=CATEGORIES)
 
         assert report.counts_by_category() == {"cat-memes": 2, "gym-memes": 1}
+
+    def test_non_moves_excluded_from_counts_but_counted(self, tmp_path: Path) -> None:
+        out = tmp_path / "organized"
+        jobs = [
+            OrganizeJob(_touch(tmp_path / "inbox" / "a.jpg"), "cat-memes", 0.9),
+            OrganizeJob(_touch(tmp_path / "inbox" / "evil.jpg"), "../../evil", 0.5),
+            OrganizeJob(tmp_path / "inbox" / "ghost.jpg", "unsorted", 0.1),
+        ]
+
+        report = organize(jobs, out, allowed=CATEGORIES)
+
+        assert report.counts_by_category() == {"cat-memes": 1}
+        assert report.moved == 1
+        assert report.refused == 1
+        assert report.skipped == 1
+        assert report.failed == 0
+
+    def test_move_error_is_failed(self, tmp_path: Path, monkeypatch) -> None:
+        src = _touch(tmp_path / "inbox" / "a.jpg")
+        out = tmp_path / "organized"
+
+        def boom(source: str, destination: str) -> None:
+            raise OSError("disk on fire")
+
+        monkeypatch.setattr(organizer_mod.shutil, "move", boom)
+
+        report = organize([OrganizeJob(src, "cat-memes", 0.9)], out)
+
+        assert report.failed == 1
+        assert report.moved == 0
+        assert report.records[0].status == STATUS_FAILED
+        assert "disk on fire" in report.records[0].detail
+        assert src.is_file()
+
+    def test_job_reason_flows_into_record_detail(self, tmp_path: Path) -> None:
+        src = _touch(tmp_path / "inbox" / "weird.jpg")
+        out = tmp_path / "organized"
+
+        report = organize(
+            [OrganizeJob(src, "unsorted", 0.0, reason="unreadable image weird.jpg")],
+            out,
+        )
+
+        assert report.moved == 1
+        assert report.records[0].detail == "unreadable image weird.jpg"
+
+    def test_errors_view_carries_reasons(self, tmp_path: Path) -> None:
+        out = tmp_path / "organized"
+        jobs = [
+            OrganizeJob(_touch(tmp_path / "inbox" / "ok.jpg"), "cat-memes", 0.9),
+            OrganizeJob(_touch(tmp_path / "inbox" / "evil.jpg"), "../../evil", 0.5),
+            OrganizeJob(tmp_path / "inbox" / "ghost.jpg", "unsorted", 0.1),
+        ]
+
+        errors = organize(jobs, out).errors
+
+        assert [r.status for r in errors] == [STATUS_REFUSED, STATUS_SKIPPED]
+        assert all(r.detail for r in errors)
 
     def test_suffix_exhaustion_is_skipped_not_fatal(
         self, tmp_path: Path, monkeypatch
@@ -206,7 +269,8 @@ class TestOrganize:
         )
 
         assert report.moved == 1
-        assert report.skipped == 1
+        assert report.refused == 1
+        assert report.skipped == 0
         assert (out / "cat-memes" / "ok.jpg").is_file()
         assert sorted(p.name for p in out.iterdir()) == ["cat-memes"]
         assert sorted(p.name for p in tmp_path.iterdir()) == ["inbox", "organized"]
@@ -244,3 +308,12 @@ def test_organizer_module_is_stdlib_only() -> None:
             imported.add(node.module.split(".")[0])
     third_party = imported - set(sys.stdlib_module_names) - {"config"}
     assert third_party == set(), f"non-stdlib imports: {sorted(third_party)}"
+
+
+def test_empty_report_is_zeroed() -> None:
+    report = empty_report()
+    assert report.records == []
+    assert report.moved == report.planned == 0
+    assert report.refused == report.failed == report.skipped == 0
+    assert report.errors == []
+    assert report.counts_by_category() == {}

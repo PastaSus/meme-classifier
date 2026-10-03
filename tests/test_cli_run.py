@@ -8,7 +8,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import cli as cli_mod
-from classifier import ClassificationResult, get_classifier
+from classifier import ClassificationResult, PredictFailed, get_classifier
 from cli import build_parser, run
 from organizer import OrganizeReport
 
@@ -164,3 +164,55 @@ class TestThresholdWiring:
 
         _, filed = self._run_with_stub(tmp_path, monkeypatch, predict)
         assert [j.category for j in filed] == ["unsorted"]
+
+
+class TestReportWiring:
+    """Story 3.2 (AD-7/AC-A4/AR-7): failures become reason-carrying unsorted
+    jobs; the empty inbox renders the organizer-owned empty report."""
+
+    def test_corrupt_image_becomes_reason_carrying_unsorted_job(
+        self, tmp_path: Path, monkeypatch, capsys
+    ) -> None:
+        inbox = tmp_path / "inbox"
+        inbox.mkdir()
+        bad = inbox / "bad.jpg"
+        bad.write_bytes(b"not an image")
+        good = inbox / "good.jpg"
+        good.write_bytes(b"fake-image-bytes")
+
+        class StubBackend:
+            def load(self):
+                return self
+
+            def predict(self, path):
+                if path.name == "bad.jpg":
+                    raise PredictFailed("unreadable image bad.jpg: cannot identify")
+                return ClassificationResult(
+                    image_path=path, category="cat-memes", confidence=0.99,
+                    backend="stub",
+                )
+
+        monkeypatch.setattr(
+            cli_mod, "get_classifier", lambda backend, threshold=0.45: StubBackend()
+        )
+
+        args = _args(input_dir=str(inbox), output=str(tmp_path / "out"), dry_run=True)
+        assert run(args) == 0  # run continues past the failure
+
+        out = capsys.readouterr().out  # stdout only: log lines go to stderr
+        assert "unreadable image bad.jpg" in out  # in the report, never only the log
+        assert "cat-memes" in out
+        assert bad.is_file() and good.is_file()  # dry-run touches nothing
+
+    def test_empty_inbox_renders_empty_report(
+        self, tmp_path: Path, capsys
+    ) -> None:
+        inbox = tmp_path / "inbox"
+        inbox.mkdir()
+
+        assert run(_args(input_dir=str(inbox), output=str(tmp_path / "out"))) == 0
+
+        out = capsys.readouterr().out
+        assert "No images found" in out
+        assert "Nothing to organize." in out
+        assert "planned: 0 | moved: 0 | skipped: 0 | refused: 0 | failed: 0" in out
