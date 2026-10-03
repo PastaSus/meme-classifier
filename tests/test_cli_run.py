@@ -7,10 +7,17 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 import cli as cli_mod
-from classifier import ClassificationResult, PredictFailed, get_classifier
+from classifier import (
+    BackendUnavailable,
+    ClassificationResult,
+    PredictFailed,
+    get_classifier,
+)
 from cli import build_parser, run
-from organizer import OrganizeReport
+from organizer import MoveRecord, OrganizeReport
 
 
 def _args(**overrides):
@@ -216,3 +223,204 @@ class TestReportWiring:
         assert "No images found" in out
         assert "Nothing to organize." in out
         assert "planned: 0 | moved: 0 | skipped: 0 | refused: 0 | failed: 0" in out
+
+
+class TestLifecycleAndExitCodes:
+    """Story 3.3 (FR-A8/AD-13): fixed lifecycle order, deterministic exits,
+    and a report printed before every return."""
+
+    def test_lifecycle_order_scan_load_organize_render(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        calls: list[str] = []
+        inbox = tmp_path / "inbox"
+        inbox.mkdir()
+        probe = inbox / "meme.jpg"
+        probe.write_bytes(b"fake-image-bytes")
+
+        def fake_scan(input_dir, recursive=False, exclude=None):
+            calls.append("scan")
+            return [probe]
+
+        class StubBackend:
+            def load(self):
+                calls.append("load")
+                return self
+
+            def predict(self, path):
+                return ClassificationResult(
+                    image_path=path, category="cat-memes", confidence=0.9,
+                    backend="stub",
+                )
+
+        def fake_organize(job_list, output, dry_run=False):
+            calls.append("organize")
+            return OrganizeReport(records=[])
+
+        def fake_print(report, dry_run):
+            calls.append("render")
+
+        monkeypatch.setattr(cli_mod, "scan_images", fake_scan)
+        monkeypatch.setattr(
+            cli_mod, "get_classifier", lambda backend, threshold=0.45: StubBackend()
+        )
+        monkeypatch.setattr(cli_mod, "organize", fake_organize)
+        monkeypatch.setattr(cli_mod, "_print_report", fake_print)
+
+        assert run(_args(input_dir=str(inbox), output=str(tmp_path / "out"))) == 0
+        assert calls == ["scan", "load", "organize", "render"]
+
+    def test_empty_inbox_skips_load_and_organize(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        calls: list[str] = []
+        inbox = tmp_path / "inbox"
+        inbox.mkdir()
+
+        def fake_scan(input_dir, recursive=False, exclude=None):
+            calls.append("scan")
+            return []
+
+        def boom(*args, **kwargs):
+            raise AssertionError("must not be called on the empty path")
+
+        monkeypatch.setattr(cli_mod, "scan_images", fake_scan)
+        monkeypatch.setattr(cli_mod, "get_classifier", boom)
+        monkeypatch.setattr(cli_mod, "organize", boom)
+        monkeypatch.setattr(
+            cli_mod, "_print_report", lambda report, dry_run: calls.append("render")
+        )
+
+        assert run(_args(input_dir=str(inbox), output=str(tmp_path / "out"))) == 0
+        assert calls == ["scan", "render"]
+
+    def test_missing_input_dir_exits_1_with_report(
+        self, tmp_path: Path, capsys
+    ) -> None:
+        missing = tmp_path / "nope"
+        out = tmp_path / "out"
+
+        assert run(_args(input_dir=str(missing), output=str(out))) == 1
+
+        stdout = capsys.readouterr().out
+        assert "Nothing to organize." in stdout
+        assert "planned: 0 | moved: 0 | skipped: 0 | refused: 0 | failed: 0" in stdout
+        assert not out.exists()
+
+    def test_output_is_file_exits_1_with_report(self, tmp_path: Path, capsys) -> None:
+        inbox = tmp_path / "inbox"
+        inbox.mkdir()
+        blocker = tmp_path / "out"
+        blocker.write_bytes(b"not-a-folder")
+
+        assert run(_args(input_dir=str(inbox), output=str(blocker))) == 1
+
+        stdout = capsys.readouterr().out
+        assert "Nothing to organize." in stdout
+        assert "planned: 0 | moved: 0 | skipped: 0 | refused: 0 | failed: 0" in stdout
+        assert blocker.read_bytes() == b"not-a-folder"  # exit before side effects
+        assert sorted(p.name for p in tmp_path.iterdir()) == ["inbox", "out"]
+
+    def test_input_path_that_is_a_file_exits_1_with_report(
+        self, tmp_path: Path, capsys
+    ) -> None:
+        not_a_dir = tmp_path / "inbox"
+        not_a_dir.write_bytes(b"not-a-folder")
+        out = tmp_path / "out"
+
+        assert run(_args(input_dir=str(not_a_dir), output=str(out))) == 1
+
+        stdout = capsys.readouterr().out
+        assert "Nothing to organize." in stdout
+        assert "planned: 0 | moved: 0 | skipped: 0 | refused: 0 | failed: 0" in stdout
+        assert not out.exists()
+
+    @pytest.mark.parametrize(
+        "error", [NotADirectoryError("gone"), OSError("disk gone")]
+    )
+    def test_main_filesystem_error_exits_1_with_report(
+        self, tmp_path: Path, monkeypatch, capsys, error: Exception
+    ) -> None:
+        inbox = tmp_path / "inbox"
+        inbox.mkdir()
+
+        def boom(args):
+            raise error
+
+        monkeypatch.setattr(cli_mod, "run", boom)
+
+        assert cli_mod.main([str(inbox)]) == 1
+
+        stdout = capsys.readouterr().out
+        assert "Nothing to organize." in stdout
+        assert "planned: 0 | moved: 0 | skipped: 0 | refused: 0 | failed: 0" in stdout
+
+    @pytest.mark.parametrize(
+        "error",
+        [BackendUnavailable("TensorFlow unavailable"), NotImplementedError("todo")],
+    )
+    def test_backend_down_non_dry_exits_2_with_report_and_no_moves(
+        self, tmp_path: Path, monkeypatch, capsys, error: Exception
+    ) -> None:
+        inbox = tmp_path / "inbox"
+        inbox.mkdir()
+        probe = inbox / "meme.jpg"
+        probe.write_bytes(b"fake-image-bytes")
+        out = tmp_path / "out"
+
+        def fake_factory(backend, threshold=0.45):
+            raise error
+
+        def fail_on_move(*args, **kwargs):
+            raise AssertionError("organize must not run when load() fails")
+
+        monkeypatch.setattr(cli_mod, "get_classifier", fake_factory)
+        monkeypatch.setattr(cli_mod, "organize", fail_on_move)
+
+        assert run(_args(input_dir=str(inbox), output=str(out))) == 2
+
+        stdout = capsys.readouterr().out
+        assert "Nothing to organize." in stdout
+        assert "planned: 0 | moved: 0 | skipped: 0 | refused: 0 | failed: 0" in stdout
+        assert probe.is_file()  # no partial moves
+        assert not out.exists()
+
+    @pytest.mark.parametrize("status", ["failed", "skipped", "refused"])
+    def test_reported_non_moves_still_exit_0(
+        self, tmp_path: Path, monkeypatch, capsys, status: str
+    ) -> None:
+        inbox = tmp_path / "inbox"
+        inbox.mkdir()
+        probe = inbox / "meme.jpg"
+        probe.write_bytes(b"fake-image-bytes")
+
+        class StubBackend:
+            def load(self):
+                return self
+
+            def predict(self, path):
+                return ClassificationResult(
+                    image_path=path, category="cat-memes", confidence=0.9,
+                    backend="stub",
+                )
+
+        def fake_organize(job_list, output, dry_run=False):
+            return OrganizeReport(
+                records=[
+                    MoveRecord(
+                        source=probe, destination=None, category="cat-memes",
+                        confidence=0.9, status=status, detail="error: boom",
+                    )
+                ]
+            )
+
+        monkeypatch.setattr(
+            cli_mod, "get_classifier", lambda backend, threshold=0.45: StubBackend()
+        )
+        monkeypatch.setattr(cli_mod, "organize", fake_organize)
+
+        assert run(_args(input_dir=str(inbox), output=str(tmp_path / "out"))) == 0
+
+        stdout = capsys.readouterr().out
+        assert f"{status}: 1" in stdout
+        assert "boom" in stdout

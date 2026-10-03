@@ -29,7 +29,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 09-27-2026 19:44
-last_updated: 10-03-2026 19:00
+last_updated: 10-03-2026 21:45
 project: meme-classifier
 project_key: NOKEY
 tracking_system: file-system
@@ -51,7 +51,7 @@ development_status:
   epic-3: in-progress
   3-1-collision-free-filing-fr-a4-fr-a5: review
   3-2-report-contract-with-reasons-fr-a7: review
-  3-3-run-lifecycle-and-exit-codes-fr-a8: backlog
+  3-3-run-lifecycle-and-exit-codes-fr-a8: review
   3-4-dry-run-that-touches-nothing-fr-a6: backlog
   3-5-fixture-accuracy-and-calibrated-floors: backlog
   3-6-idempotency-and-tf-free-qa-suite-nfr-a1-nfr-a3: backlog
