@@ -8,8 +8,9 @@ Two backends from the lab reference sheet share one ABC contract:
                      Dense, categorical cross-entropy) trained on labelled
                      folders.
 
-Implementation bodies are intentionally left to the Dev Agent (BMAD Phase 4)
-and raise NotImplementedError with an explicit marker.
+``mobilenet`` is implemented (ImageNet inference + label mapping); the
+``custom-cnn`` body is intentionally left to the Dev Agent (BMAD Phase 4) and
+raises NotImplementedError with an explicit marker.
 """
 from __future__ import annotations
 
@@ -18,7 +19,12 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
 
-from config import CONFIDENCE_THRESHOLD, IMAGENET_LABEL_TO_CATEGORY, MODEL_BACKENDS
+from config import (
+    CATEGORIES,
+    CONFIDENCE_THRESHOLD,
+    IMAGENET_LABEL_TO_CATEGORY,
+    MODEL_BACKENDS,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -75,8 +81,9 @@ class MobileNetV2Classifier(BaseClassifier):
     """Lab reference: MobileNetV2 pre-trained on ImageNet.
 
     Strategy: run ImageNet inference, map the top label through
-    IMAGENET_LABEL_TO_CATEGORY, and fall back to "unsorted" when unmapped or
-    low-confidence (the threshold is applied later, in cli.py).
+    IMAGENET_LABEL_TO_CATEGORY, and route unmapped labels to "unsorted" with a
+    reason. Below-threshold handling stays with the caller until Story 2.3 moves
+    it into the classifier layer (AD-10).
     """
 
     name = "mobilenet"
@@ -88,21 +95,59 @@ class MobileNetV2Classifier(BaseClassifier):
         self.weights = weights
         self._model = None
         self._decode = None
+        self._preprocess = None
 
     def load(self) -> "MobileNetV2Classifier":
-        # TODO(Dev Agent): tf.keras.applications.MobileNetV2(weights=self.weights)
-        #                   + tf.keras.applications.mobilenet_v2.preprocess_input
-        #                   + decode_predictions helper.
-        raise NotImplementedError(
-            f"{DEV_TODO} Load MobileNetV2 in MobileNetV2Classifier.load(). "
-            "See docs/system-architecture.md section 2.3."
-        )
+        """Load MobileNetV2/ImageNet weights — the ONLY place that fetches (AD-8)."""
+        try:
+            from tensorflow import keras
+        except Exception as exc:
+            raise BackendUnavailable(f"TensorFlow unavailable: {exc}") from exc
+        try:
+            self._model = keras.applications.MobileNetV2(weights=self.weights)
+            self._preprocess = keras.applications.mobilenet_v2.preprocess_input
+            self._decode = keras.applications.mobilenet_v2.decode_predictions
+        except Exception as exc:
+            raise BackendUnavailable(f"MobileNetV2 load failed: {exc}") from exc
+        return self
 
     def predict(self, image_path: Path) -> ClassificationResult:
-        # TODO(Dev Agent): preprocess image -> model.predict -> decode top-1 label
-        #                   -> map via IMAGENET_LABEL_TO_CATEGORY -> confidence.
-        raise NotImplementedError(
-            f"{DEV_TODO} Implement inference in MobileNetV2Classifier.predict()."
+        """Preprocess → model.predict → top-1 → shipped label mapping."""
+        path = Path(image_path)
+        if self._model is None or self._preprocess is None or self._decode is None:
+            raise PredictFailed("mobilenet backend not loaded (call load() first)")
+        try:
+            import numpy as np
+            from PIL import Image
+        except Exception as exc:
+            raise PredictFailed(f"image dependencies unavailable: {exc}") from exc
+        try:
+            with Image.open(path) as img:
+                arr = np.asarray(
+                    img.convert("RGB").resize((224, 224)), dtype=np.float32
+                )
+        except Exception as exc:
+            raise PredictFailed(f"unreadable image {path.name}: {exc}") from exc
+        try:
+            batch = self._preprocess(np.expand_dims(arr, 0))
+            preds = self._model.predict(batch, verbose=0)
+            decoded = self._decode(preds, top=1)[0][0]
+            raw_label = str(decoded[1]).lower()
+            confidence = float(decoded[2])
+        except Exception as exc:
+            raise PredictFailed(f"inference failed for {path.name}: {exc}") from exc
+
+        category = IMAGENET_LABEL_TO_CATEGORY.get(raw_label)
+        reason = None if category else f"unmapped label {raw_label!r}"
+        final = category or "unsorted"
+        return ClassificationResult(
+            image_path=path,
+            category=final,
+            confidence=confidence,
+            backend=self.name,
+            raw_label=raw_label,
+            reason=reason,
+            probabilities=tuple(1.0 if c == final else 0.0 for c in CATEGORIES),
         )
 
 
