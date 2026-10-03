@@ -1,6 +1,7 @@
 """Command-line interface and orchestration for the Meme & Reaction Image Organizer.
 
-Flow (docs/system-architecture.md 2.2): scan -> classify -> organize -> report.
+Lifecycle (AD-13): parse -> train? -> scan -> empty-check -> load -> organize
+-> render, with a report printed before every return.
 """
 from __future__ import annotations
 
@@ -145,21 +146,25 @@ def _print_report(report: OrganizeReport, dry_run: bool) -> None:
 
 
 def run(args: argparse.Namespace) -> int:
-    # Path validation lives here, before any filesystem side effect (Story 1.4,
-    # FR-A1): a missing inbox exits 1 without creating the output tree.
+    # AD-13 lifecycle: parse → train? → scan → empty-check → load → organize
+    # → render. (`parse` lives in main()/argparse; the `train?` slot belongs
+    # to Epic 4 and is reserved here with no behavior yet.) A report prints
+    # before every return below (FR-A7/FR-A8).
     input_dir = Path(args.input_dir)
     if not input_dir.is_dir():
         logger.error("Input directory does not exist: %s", input_dir.resolve())
+        _print_report(empty_report(), args.dry_run)
         return 1
 
     output = Path(args.output)
     if output.exists() and not output.is_dir():
         logger.error("Output path is not a directory: %s", output.resolve())
+        _print_report(empty_report(), args.dry_run)
         return 1
 
     paths = scan_images(input_dir, recursive=args.recursive, exclude=output)
     if not paths:
-        print(f"No images found in {input_dir}")
+        print(f"No images found in {args.input_dir}")
         _print_report(empty_report(), args.dry_run)  # AR-7: organizer owns it
         return 0
 
@@ -171,9 +176,11 @@ def run(args: argparse.Namespace) -> int:
     except NotImplementedError as exc:
         logger.error("%s", exc)
         logger.error("Backend not implemented yet — BMAD Dev phase pending.")
+        _print_report(empty_report(), args.dry_run)
         return 2
     except Exception as exc:  # e.g. TensorFlow missing (NFR-A1)
         logger.error("Failed to initialise backend %r: %s", args.backend, exc)
+        _print_report(empty_report(), args.dry_run)
         return 2
 
     jobs: list[OrganizeJob] = []
@@ -218,9 +225,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         return run(args)
     except NotADirectoryError as exc:
         logger.error("%s", exc)
+        _print_report(empty_report(), args.dry_run)
         return 1
     except OSError as exc:
         logger.error("Filesystem error: %s", exc)
+        _print_report(empty_report(), args.dry_run)
         return 1
 
 
