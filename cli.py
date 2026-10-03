@@ -158,7 +158,7 @@ def run(args: argparse.Namespace) -> int:
     print(f"Backend: {args.backend} | threshold: {args.threshold:.2f} | dry-run: {args.dry_run}")
 
     try:
-        classifier = get_classifier(args.backend).load()
+        classifier = get_classifier(args.backend, threshold=args.threshold).load()
     except NotImplementedError as exc:
         logger.error("%s", exc)
         logger.error("Backend not implemented yet — BMAD Dev phase pending.")
@@ -176,11 +176,13 @@ def run(args: argparse.Namespace) -> int:
             jobs.append(OrganizeJob(source=path, category="unsorted", confidence=0.0))
             continue
 
-        category = (
-            result.category if result.confidence >= args.threshold else "unsorted"
-        )  # FR-A3
+        # FR-A3 lives in the classifier layer now (Story 2.3, AR-4): cli
+        # trusts result.category and never re-routes.
+        # TODO(Story 3.2): carry result.reason into the job/report contract.
         jobs.append(
-            OrganizeJob(source=path, category=category, confidence=result.confidence)
+            OrganizeJob(
+                source=path, category=result.category, confidence=result.confidence
+            )
         )
 
     report = organize(jobs, output, dry_run=args.dry_run)  # FR-A4, FR-A6

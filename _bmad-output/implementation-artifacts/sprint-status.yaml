@@ -29,7 +29,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 09-27-2026 19:44
-last_updated: 10-02-2026 21:05
+last_updated: 10-03-2026 17:51
 project: meme-classifier
 project_key: NOKEY
 tracking_system: file-system
@@ -45,7 +45,7 @@ development_status:
   epic-2: in-progress
   2-1-classifier-contract-and-backend-selection: done
   2-2-mobilenetv2-backend-with-shipped-mapping: done
-  2-3-confidence-threshold-and-category-normalization: backlog
+  2-3-confidence-threshold-and-category-normalization: review
   epic-2-retrospective: optional
 
   epic-3: backlog

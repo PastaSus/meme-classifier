@@ -1,5 +1,5 @@
-"""Unit tests for the classifier contract, backend selection (Story 2.1) and the
-MobileNetV2 body (Story 2.2).
+"""Unit tests for the classifier contract, backend selection (Story 2.1), the
+MobileNetV2 body (Story 2.2), and the shared routing policy (Story 2.3).
 
 TF-free by default: contract/factory tests and the AD-7 failure paths never
 import TensorFlow, so this module runs with TF absent (NFR-A1). The tests that
@@ -187,3 +187,48 @@ class TestMobileNetV2TF:
     ) -> None:
         with pytest.raises(PredictFailed):
             mobilenet.predict(tmp_path / "gone.jpg")
+
+
+class TestThresholdRouting:
+    """Story 2.3: the single routing policy lives in the classifier layer.
+
+    TF-free: `route()` needs no model, so every path is asserted without
+    TensorFlow (NFR-A1).
+    """
+
+    def test_below_threshold_routes_to_unsorted_with_exact_reason(self) -> None:
+        assert _StubBackend().route("cat-memes", 0.40) == (
+            "unsorted",
+            "confidence 0.40 < 0.45",
+        )
+
+    def test_threshold_boundary_is_inclusive(self) -> None:
+        assert _StubBackend().route("cat-memes", 0.45) == ("cat-memes", None)
+
+    def test_unmapped_routes_to_unsorted_regardless_of_confidence(self) -> None:
+        for confidence in (0.10, 0.99):
+            final, reason = _StubBackend().route(
+                None, confidence, raw_label="toaster"
+            )
+            assert final == "unsorted"
+            assert reason == "unmapped label 'toaster'"
+
+    def test_unknown_category_is_normalized_with_reason(self) -> None:
+        final, reason = _StubBackend().route("dank-memes", 0.99)
+        assert final == "unsorted"
+        assert reason is not None and "dank-memes" in reason
+
+    def test_member_above_threshold_passes_through(self) -> None:
+        assert _StubBackend().route("cat-memes", 0.99) == ("cat-memes", None)
+
+    def test_custom_threshold_changes_the_cutoff(self) -> None:
+        assert _StubBackend(threshold=0.9).route("cat-memes", 0.85)[0] == "unsorted"
+        assert _StubBackend(threshold=0.9).route("cat-memes", 0.95)[0] == "cat-memes"
+
+    def test_below_threshold_wins_over_unknown_category(self) -> None:
+        # Order is pinned: unmapped → threshold → membership. Both rules agree
+        # on `unsorted`; the confidence reason is reported.
+        assert _StubBackend().route("dank-memes", 0.10) == (
+            "unsorted",
+            "confidence 0.10 < 0.45",
+        )
