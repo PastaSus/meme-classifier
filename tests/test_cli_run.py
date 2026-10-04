@@ -385,6 +385,57 @@ class TestLifecycleAndExitCodes:
         assert probe.is_file()  # no partial moves
         assert not out.exists()
 
+    @pytest.mark.parametrize(
+        "error",
+        [BackendUnavailable("TensorFlow unavailable"), NotImplementedError("todo")],
+    )
+    def test_backend_down_dry_run_plans_unsorted_and_exits_0(
+        self, tmp_path: Path, monkeypatch, capsys, error: Exception
+    ) -> None:
+        inbox = tmp_path / "inbox"
+        inbox.mkdir()
+        probe = inbox / "meme.jpg"
+        probe.write_bytes(b"fake-image-bytes")
+        out = tmp_path / "out"
+
+        def fake_factory(backend, threshold=0.45):
+            raise error
+
+        monkeypatch.setattr(cli_mod, "get_classifier", fake_factory)
+
+        assert run(_args(input_dir=str(inbox), output=str(out), dry_run=True)) == 0
+
+        stdout = capsys.readouterr().out
+        assert "Warning: backend 'mobilenet' unavailable" in stdout
+        assert "unsorted" in stdout
+        assert "planned: 1 | moved: 0 | skipped: 0 | refused: 0 | failed: 0" in stdout
+        assert probe.is_file()  # dry-run touches nothing
+        assert not out.exists()
+
+    def test_backend_down_dry_run_reserves_against_files_on_disk(
+        self, tmp_path: Path, monkeypatch, capsys
+    ) -> None:
+        inbox = tmp_path / "inbox"
+        (inbox / "one").mkdir(parents=True)
+        (inbox / "two").mkdir(parents=True)
+        (inbox / "one" / "cat.jpg").write_bytes(b"fake-image-bytes")
+        (inbox / "two" / "cat.jpg").write_bytes(b"fake-image-bytes")
+        out = tmp_path / "out"
+        (out / "unsorted").mkdir(parents=True)
+        (out / "unsorted" / "cat.jpg").write_bytes(b"already-filed")
+
+        def fake_factory(backend, threshold=0.45):
+            raise BackendUnavailable("TensorFlow unavailable")
+
+        monkeypatch.setattr(cli_mod, "get_classifier", fake_factory)
+
+        assert run(_args(input_dir=str(inbox), output=str(out), dry_run=True, recursive=True)) == 0
+
+        stdout = capsys.readouterr().out
+        assert "planned: 2 | moved: 0 | skipped: 0 | refused: 0 | failed: 0" in stdout
+        assert "cat-1.jpg" in stdout and "cat-2.jpg" in stdout  # disk + virtual taken
+        assert sorted(p.name for p in (out / "unsorted").iterdir()) == ["cat.jpg"]
+
     @pytest.mark.parametrize("status", ["failed", "skipped", "refused"])
     def test_reported_non_moves_still_exit_0(
         self, tmp_path: Path, monkeypatch, capsys, status: str

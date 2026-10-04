@@ -138,6 +138,27 @@ class TestOrganize:
         assert (out / "cat-memes" / "cat.jpg").is_file()
         assert (out / "cat-memes" / "cat-1.jpg").is_file()
 
+    def test_dry_run_shared_basename_plans_suffixed_names(self, tmp_path: Path) -> None:
+        first = _touch(tmp_path / "inbox" / "one" / "cat.jpg")
+        second = _touch(tmp_path / "inbox" / "two" / "cat.jpg")
+        out = tmp_path / "organized"
+
+        report = organize(
+            [
+                OrganizeJob(first, "cat-memes", 0.9),
+                OrganizeJob(second, "cat-memes", 0.8),
+            ],
+            out,
+            dry_run=True,
+            allowed=CATEGORIES,
+        )
+
+        assert report.planned == 2
+        assert report.moved == 0
+        assert [r.destination.name for r in report.records] == ["cat.jpg", "cat-1.jpg"]
+        assert first.is_file() and second.is_file()
+        assert not out.exists()
+
     def test_disallowed_category_is_refused_not_fatal(self, tmp_path: Path) -> None:
         src = _touch(tmp_path / "inbox" / "x.jpg")
 
