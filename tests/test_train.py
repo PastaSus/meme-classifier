@@ -200,3 +200,44 @@ class TestRealFit:
         with pytest.raises(BackendUnavailable, match="Training failed"):
             train_labeled_model(root, model_path)
         assert model_path.read_bytes() == b"pre-existing-artifact"
+
+
+@needs_tf
+class TestCustomCNNEndToEnd:
+    """Story 4.2 (AC-A11): a 4.1 artifact drives a real organize run."""
+
+    def test_trained_artifact_files_every_image(
+        self, tmp_path: Path, capsys
+    ) -> None:
+        from cli import build_parser, run
+
+        inbox = tmp_path / "inbox"
+        colours = [(200, 40, 40), (40, 140, 240), (120, 40, 180), (40, 180, 90)]
+        for index, category in enumerate(CATEGORIES):
+            for slot in range(2):
+                _image(
+                    inbox / category / f"{category}-{slot}.jpg",
+                    colours[index % len(colours)],
+                )
+        out = tmp_path / "out"
+        model_path = tmp_path / "models" / "custom-cnn.keras"
+
+        train_info = train_labeled_model(inbox, model_path)
+        assert train_info["samples"] == 2 * len(CATEGORIES)
+
+        args = build_parser().parse_args(
+            [
+                str(inbox),
+                "--output", str(out),
+                "--backend", "custom-cnn",
+                "--model-path", str(model_path),
+                "--recursive",
+            ]
+        )
+        assert run(args) == 0
+
+        moved = [p for p in out.rglob("*") if p.is_file()]
+        assert len(moved) == 2 * len(CATEGORIES)
+        assert not list(inbox.rglob("*.jpg"))  # inbox drained
+        stdout = capsys.readouterr().out
+        assert "moved: 10 | " in stdout or "moved: 10 " in stdout

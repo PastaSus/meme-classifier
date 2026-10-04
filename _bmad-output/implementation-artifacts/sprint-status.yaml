@@ -59,6 +59,6 @@ development_status:
 
   epic-4: backlog
   4-1-training-lifecycle-fr-a9: done
-  4-2-custom-cnn-backend-via-model-path-fr-a2-nfr-a4: backlog
+  4-2-custom-cnn-backend-via-model-path-fr-a2-nfr-a4: review
   4-3-demo-readiness-and-oq-calibration: backlog
   epic-4-retrospective: optional
