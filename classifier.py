@@ -15,6 +15,7 @@ raises NotImplementedError with an explicit marker.
 from __future__ import annotations
 
 import logging
+import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
@@ -22,6 +23,7 @@ from pathlib import Path
 from config import (
     CATEGORIES,
     CONFIDENCE_THRESHOLD,
+    IMAGE_EXTENSIONS,
     IMAGENET_LABEL_TO_CATEGORY,
     MODEL_BACKENDS,
 )
@@ -208,6 +210,154 @@ _BACKENDS: dict[str, type[BaseClassifier]] = {
     MobileNetV2Classifier.name: MobileNetV2Classifier,
     CustomCNNClassifier.name: CustomCNNClassifier,
 }
+
+
+# --- Training hyperparameters (Story 4.1, FR-A9) ----------------------------
+# Small-CPU values picked by this story — deliberately NOT CLI flags (spec).
+# Recorded here and echoed in the cli train summary.
+_TRAIN_IMAGE_SIZE = 64  # matches the tests/fixtures scale (64x64)
+_TRAIN_EPOCHS = 5
+_TRAIN_BATCH_SIZE = 16
+_TRAIN_CONV_FILTERS = 32
+
+
+def train_labeled_model(
+    root: Path | str, model_path: Path | str
+) -> dict[str, object]:
+    """Fit the AD-10 lab CNN on ``<root>/<category>/*.jpg`` and save ``.keras``.
+
+    Architecture (lab sheet, AD-10): Conv2D -> MaxPooling2D -> Flatten ->
+    Dense(softmax) with categorical cross-entropy, ``adam`` optimizer. Labels
+    follow ``config.CATEGORIES`` order. This is the ONLY training entry point
+    (ML firewall: TensorFlow/Pillow/NumPy are imported function-local so the
+    module stays importable — and cli stays runnable — without them).
+
+    Hyperparameters: image 64x64, 5 epochs, batch 16, Conv2D(32, 3x3, relu).
+
+    Returns a summary dict with ``samples``, ``epochs``, ``batch_size``,
+    ``image_size``, ``per_category`` (``{category: count}``) and
+    ``model_path`` (resolved ``Path``) for the cli train summary.
+
+    Raises:
+        FileNotFoundError: *root* is not a directory (cli maps to exit 1).
+        ValueError: no (readable) training images under *root* (exit 1).
+        BackendUnavailable: TF/PIL/numpy missing or fit/save failed (exit 2).
+    """
+    root_path = Path(root)
+    if not root_path.is_dir():
+        raise FileNotFoundError(f"Training root does not exist: {root_path}")
+
+    # Stdlib-only collection first, so BAD_ROOT stays TF-free (exit 1 even
+    # where TensorFlow is absent).
+    buckets: dict[str, list[Path]] = {}
+    for category in CATEGORIES:
+        subdir = root_path / category
+        if not subdir.is_dir():
+            continue
+        try:
+            files = sorted(
+                p
+                for p in subdir.iterdir()
+                if p.is_file() and p.suffix.lower() in IMAGE_EXTENSIONS
+            )
+        except OSError as exc:
+            # An unreadable subdir contributes nothing (exit 1 via the
+            # no-images ValueError below, never the TF-failure bucket).
+            logger.warning("Skipping unreadable training subdir %s (%s)", subdir, exc)
+            continue
+        if files:
+            buckets[category] = files
+    if not buckets:
+        raise ValueError(f"No training images found under {root_path}")
+
+    try:
+        import numpy as np
+        from PIL import Image
+        from tensorflow import keras
+    except Exception as exc:
+        raise BackendUnavailable(
+            f"Training dependencies unavailable: {exc}"
+        ) from exc
+
+    try:
+        images: list = []
+        labels: list[int] = []
+        for index, category in enumerate(CATEGORIES):
+            for path in buckets.get(category, []):
+                try:
+                    with Image.open(path) as img:
+                        arr = np.asarray(
+                            img.convert("RGB").resize(
+                                (_TRAIN_IMAGE_SIZE, _TRAIN_IMAGE_SIZE)
+                            ),
+                            dtype=np.float32,
+                        )
+                except Exception as exc:
+                    # AC-A4 spirit: a corrupt file never aborts the batch.
+                    logger.warning("Skipping unreadable training image %s (%s)", path, exc)
+                    continue
+                images.append(arr / 255.0)
+                labels.append(index)
+        if not images:
+            raise ValueError(f"No readable training images under {root_path}")
+        X = np.stack(images).astype(np.float32)
+        y = np.eye(len(CATEGORIES), dtype=np.float32)[np.asarray(labels)]
+
+        model = keras.Sequential(
+            [
+                keras.layers.Input(
+                    shape=(_TRAIN_IMAGE_SIZE, _TRAIN_IMAGE_SIZE, 3)
+                ),
+                keras.layers.Conv2D(
+                    _TRAIN_CONV_FILTERS, (3, 3), activation="relu"
+                ),
+                keras.layers.MaxPooling2D((2, 2)),
+                keras.layers.Flatten(),
+                keras.layers.Dense(len(CATEGORIES), activation="softmax"),
+            ]
+        )
+        model.compile(
+            optimizer="adam", loss="categorical_crossentropy", metrics=["accuracy"]
+        )
+        model.fit(
+            X, y, epochs=_TRAIN_EPOCHS, batch_size=_TRAIN_BATCH_SIZE, verbose=0
+        )
+
+        out_path = Path(model_path)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        # Atomic write: save to a temp sibling (same dir => same filesystem)
+        # and os.replace onto the target, so a failed save can neither leave
+        # a fresh partial nor truncate a pre-existing artifact.
+        tmp_path = out_path.parent / (out_path.stem + ".tmp.keras")
+        try:
+            model.save(str(tmp_path))
+            os.replace(tmp_path, out_path)
+        except Exception:
+            try:
+                if tmp_path.is_file():
+                    tmp_path.unlink()
+            except OSError:
+                pass
+            raise
+    except ValueError:
+        raise
+    except BackendUnavailable:
+        raise
+    except Exception as exc:
+        raise BackendUnavailable(f"Training failed: {exc}") from exc
+
+    per_category: dict[str, int] = {}
+    for label in labels:
+        name = CATEGORIES[label]
+        per_category[name] = per_category.get(name, 0) + 1
+    return {
+        "samples": int(len(images)),
+        "epochs": _TRAIN_EPOCHS,
+        "batch_size": _TRAIN_BATCH_SIZE,
+        "image_size": _TRAIN_IMAGE_SIZE,
+        "per_category": per_category,
+        "model_path": out_path.resolve(),
+    }
 
 
 def get_classifier(
