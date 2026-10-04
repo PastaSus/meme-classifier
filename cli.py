@@ -139,6 +139,13 @@ def _print_report(report: OrganizeReport, dry_run: bool) -> None:
     )
     for category, count in report.counts_by_category().items():
         print(f"    {category}: {count}")
+    if report.fixture_total:
+        accuracy = report.fixture_accuracy or 0.0
+        print(
+            f"Fixture accuracy: {report.fixture_correct}/{report.fixture_total} "
+            f"({accuracy * 100:.1f}%)"
+        )
+        print(f"Unsorted share: {report.unsorted_share * 100:.1f}%")
     if report.errors:
         print("  Errors:")
         for record in report.errors:
@@ -146,7 +153,8 @@ def _print_report(report: OrganizeReport, dry_run: bool) -> None:
 
 
 def _dry_run_without_backend(
-    args: argparse.Namespace, paths: list[Path], exc: Exception
+    args: argparse.Namespace, paths: list[Path], exc: Exception,
+    fixture_root: Path | None = None,
 ) -> int:
     """Plan every scanned file to unsorted when load() fails under --dry-run.
 
@@ -160,7 +168,7 @@ def _dry_run_without_backend(
         OrganizeJob(source=path, category="unsorted", confidence=0.0, reason=reason)
         for path in paths
     ]
-    report = organize(jobs, Path(args.output), dry_run=True)
+    report = organize(jobs, Path(args.output), dry_run=True, fixture_root=fixture_root)
     _print_report(report, True)  # FR-A7
     return 0
 
@@ -182,6 +190,25 @@ def run(args: argparse.Namespace) -> int:
         _print_report(empty_report(), args.dry_run)
         return 1
 
+    # Story 3.5 (AD-12): validate the explicit fixture root here (exit 1,
+    # before side effects) and pass it through to organize(); render-only —
+    # accuracy is computed inside organize(), floors judged in tests only.
+    # A missing *default* root is silently skipped so plain runs never fail
+    # for want of a fixture tree.
+    fixture_raw = getattr(args, "fixture", str(DEFAULT_FIXTURE_DIR))
+    fixture_root: Path | None = None
+    if fixture_raw is not None and str(fixture_raw) != "":
+        candidate = Path(str(fixture_raw))
+        is_default = candidate == DEFAULT_FIXTURE_DIR
+        if candidate.is_dir():
+            fixture_root = candidate
+        elif is_default:
+            fixture_root = None
+        else:
+            logger.error("Fixture directory does not exist: %s", candidate)
+            _print_report(empty_report(), args.dry_run)
+            return 1
+
     paths = scan_images(input_dir, recursive=args.recursive, exclude=output)
     if not paths:
         print(f"No images found in {args.input_dir}")
@@ -197,13 +224,13 @@ def run(args: argparse.Namespace) -> int:
         logger.error("%s", exc)
         logger.error("Backend not implemented yet — BMAD Dev phase pending.")
         if args.dry_run:
-            return _dry_run_without_backend(args, paths, exc)
+            return _dry_run_without_backend(args, paths, exc, fixture_root)
         _print_report(empty_report(), args.dry_run)
         return 2
     except Exception as exc:  # e.g. TensorFlow missing (NFR-A1)
         logger.error("Failed to initialise backend %r: %s", args.backend, exc)
         if args.dry_run:
-            return _dry_run_without_backend(args, paths, exc)
+            return _dry_run_without_backend(args, paths, exc, fixture_root)
         _print_report(empty_report(), args.dry_run)
         return 2
 
@@ -234,7 +261,7 @@ def run(args: argparse.Namespace) -> int:
             )
         )
 
-    report = organize(jobs, output, dry_run=args.dry_run)  # FR-A4, FR-A6
+    report = organize(jobs, output, dry_run=args.dry_run, fixture_root=fixture_root)  # FR-A4, FR-A6
     _print_report(report, args.dry_run)  # FR-A7
     return 0
 

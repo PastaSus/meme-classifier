@@ -117,7 +117,7 @@ class TestThresholdWiring:
 
         jobs: dict = {}
 
-        def fake_organize(job_list, output, dry_run=False):
+        def fake_organize(job_list, output, dry_run=False, fixture_root=None):
             jobs["list"] = list(job_list)
             return OrganizeReport(records=[])
 
@@ -253,7 +253,7 @@ class TestLifecycleAndExitCodes:
                     backend="stub",
                 )
 
-        def fake_organize(job_list, output, dry_run=False):
+        def fake_organize(job_list, output, dry_run=False, fixture_root=None):
             calls.append("organize")
             return OrganizeReport(records=[])
 
@@ -436,6 +436,29 @@ class TestLifecycleAndExitCodes:
         assert "cat-1.jpg" in stdout and "cat-2.jpg" in stdout  # disk + virtual taken
         assert sorted(p.name for p in (out / "unsorted").iterdir()) == ["cat.jpg"]
 
+    def test_backend_down_dry_run_with_fixture_reports_unsorted_accuracy(
+        self, tmp_path: Path, monkeypatch, capsys
+    ) -> None:
+        fx = tmp_path / "fx"
+        _make_labelled_tree(fx, per_category=2)
+        out = tmp_path / "out"
+
+        def fake_factory(backend, threshold=0.45):
+            raise BackendUnavailable("TensorFlow unavailable")
+
+        monkeypatch.setattr(cli_mod, "get_classifier", fake_factory)
+
+        code = run(
+            _args(
+                input_dir=str(fx), output=str(out), recursive=True,
+                fixture=str(fx), dry_run=True,
+            )
+        )
+
+        assert code == 0
+        stdout = capsys.readouterr().out
+        assert "Fixture accuracy: 2/10" in stdout
+
     @pytest.mark.parametrize("status", ["failed", "skipped", "refused"])
     def test_reported_non_moves_still_exit_0(
         self, tmp_path: Path, monkeypatch, capsys, status: str
@@ -455,7 +478,7 @@ class TestLifecycleAndExitCodes:
                     backend="stub",
                 )
 
-        def fake_organize(job_list, output, dry_run=False):
+        def fake_organize(job_list, output, dry_run=False, fixture_root=None):
             return OrganizeReport(
                 records=[
                     MoveRecord(
@@ -475,3 +498,255 @@ class TestLifecycleAndExitCodes:
         stdout = capsys.readouterr().out
         assert f"{status}: 1" in stdout
         assert "boom" in stdout
+
+
+def _make_labelled_tree(root: Path, per_category: int = 2) -> list[Path]:
+    """Build a labelled tree under *root* using the real CATEGORIES list."""
+    from config import CATEGORIES
+
+    paths: list[Path] = []
+    for category in CATEGORIES:
+        for index in range(per_category):
+            p = root / category / f"{category}-{index}.jpg"
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_bytes(b"fake-image-bytes")
+            paths.append(p)
+    return paths
+
+
+class _ParentNameBackend:
+    """Stub backend: predicts the immediate fixture subfolder name."""
+
+    def __init__(self, fixture_root: Path):
+        self.fixture_root = Path(fixture_root)
+
+    def load(self):
+        return self
+
+    def predict(self, path):
+        from classifier import ClassificationResult
+
+        p = Path(path)
+        try:
+            rel = p.resolve().relative_to(self.fixture_root.resolve())
+            category = rel.parts[0] if len(rel.parts) >= 2 else "unsorted"
+        except ValueError:
+            category = "unsorted"
+        return ClassificationResult(
+            image_path=p, category=category, confidence=0.99, backend="stub",
+        )
+
+
+class TestFixtureWiring:
+    """Story 3.5 (FR-A7/AR-13): --fixture pass-through, render-only cli."""
+
+    def test_explicit_bad_root_exits_1_before_side_effects(
+        self, tmp_path: Path, capsys
+    ) -> None:
+        inbox = tmp_path / "inbox"
+        inbox.mkdir()
+        (inbox / "meme.jpg").write_bytes(b"fake-image-bytes")
+        out = tmp_path / "out"
+        missing = tmp_path / "no-fixture"
+
+        code = run(_args(input_dir=str(inbox), output=str(out), fixture=str(missing)))
+
+        assert code == 1
+        stdout = capsys.readouterr().out
+        assert "Nothing to organize." in stdout
+        assert "planned: 0 | moved: 0 | skipped: 0 | refused: 0 | failed: 0" in stdout
+        assert "Fixture accuracy" not in stdout
+        assert not out.exists()
+
+    def test_default_root_missing_is_silently_skipped(
+        self, tmp_path: Path, monkeypatch, capsys
+    ) -> None:
+        inbox = tmp_path / "inbox"
+        inbox.mkdir()
+        (inbox / "meme.jpg").write_bytes(b"fake-image-bytes")
+        out = tmp_path / "out"
+        missing_default = tmp_path / "default-gone"
+        assert not missing_default.exists()
+        monkeypatch.setattr(cli_mod, "DEFAULT_FIXTURE_DIR", missing_default)
+
+        class StubBackend:
+            def load(self):
+                return self
+
+            def predict(self, path):
+                return ClassificationResult(
+                    image_path=path, category="cat-memes", confidence=0.9,
+                    backend="stub",
+                )
+
+        monkeypatch.setattr(
+            cli_mod, "get_classifier", lambda backend, threshold=0.45: StubBackend()
+        )
+
+        code = run(
+            _args(
+                input_dir=str(inbox), output=str(out),
+                fixture=str(missing_default),
+            )
+        )
+
+        assert code == 0
+        stdout = capsys.readouterr().out
+        assert "Fixture accuracy" not in stdout
+        assert (out / "cat-memes" / "meme.jpg").is_file()
+
+    def test_fixture_run_reports_accuracy_and_counts(
+        self, tmp_path: Path, monkeypatch, capsys
+    ) -> None:
+        from config import CATEGORIES
+
+        fx = tmp_path / "fx"
+        _make_labelled_tree(fx, per_category=1)
+        out = tmp_path / "out"
+        monkeypatch.setattr(
+            cli_mod, "get_classifier",
+            lambda backend, threshold=0.45: _ParentNameBackend(fx),
+        )
+
+        code = run(
+            _args(
+                input_dir=str(fx), output=str(out), recursive=True,
+                fixture=str(fx), dry_run=True,
+            )
+        )
+
+        assert code == 0
+        stdout = capsys.readouterr().out
+        assert f"Fixture accuracy: {len(CATEGORIES)}/{len(CATEGORIES)}" in stdout
+        for category in CATEGORIES:
+            assert category in stdout
+
+    def test_stub_backed_run_meets_both_floors(
+        self, tmp_path: Path, monkeypatch, capsys
+    ) -> None:
+        from config import ACCURACY_FLOOR, CATEGORIES, UNSORTED_SHARE_FLOOR
+
+        assert ACCURACY_FLOOR == 0.6
+        assert UNSORTED_SHARE_FLOOR == 0.8
+
+        fx = tmp_path / "fx"
+        _make_labelled_tree(fx, per_category=2)
+        out = tmp_path / "out"
+        captured: dict = {}
+        real_organize = cli_mod.organize
+
+        def spy_organize(job_list, output, dry_run=False, fixture_root=None):
+            captured["fixture_root"] = fixture_root
+            return real_organize(
+                job_list, output, dry_run=dry_run, fixture_root=fixture_root
+            )
+
+        monkeypatch.setattr(
+            cli_mod, "get_classifier",
+            lambda backend, threshold=0.45: _ParentNameBackend(fx),
+        )
+        monkeypatch.setattr(cli_mod, "organize", spy_organize)
+
+        code = run(
+            _args(
+                input_dir=str(fx), output=str(out), recursive=True,
+                fixture=str(fx), dry_run=True,
+            )
+        )
+
+        assert code == 0
+        assert Path(captured["fixture_root"]) == fx
+        stdout = capsys.readouterr().out
+        assert "Fixture accuracy: 10/10" in stdout
+        assert "Unsorted share: 20.0%" in stdout
+
+        # Floors judged here in the test, never in organizer/cli logic.
+        import re
+
+        match = re.search(r"Fixture accuracy: (\d+)/(\d+)", stdout)
+        assert match is not None
+        correct, total = int(match.group(1)), int(match.group(2))
+        assert correct / total >= ACCURACY_FLOOR
+        # 10/10 correct implies zero unsorted; assert the counter-metric too.
+        assert "unsorted: 2" in stdout  # per-category counts include it
+        assert 2 / 10 <= UNSORTED_SHARE_FLOOR
+
+    def test_backend_down_with_fixture_exits_2_without_accuracy(
+        self, tmp_path: Path, monkeypatch, capsys
+    ) -> None:
+        fx = tmp_path / "fx"
+        _make_labelled_tree(fx, per_category=1)
+        out = tmp_path / "out"
+
+        def fake_factory(backend, threshold=0.45):
+            raise BackendUnavailable("TensorFlow unavailable")
+
+        def fail_on_move(*args, **kwargs):
+            raise AssertionError("organize must not run when load() fails")
+
+        monkeypatch.setattr(cli_mod, "get_classifier", fake_factory)
+        monkeypatch.setattr(cli_mod, "organize", fail_on_move)
+
+        code = run(
+            _args(
+                input_dir=str(fx), output=str(out), recursive=True,
+                fixture=str(fx),
+            )
+        )
+
+        assert code == 2
+        stdout = capsys.readouterr().out
+        assert "Fixture accuracy" not in stdout
+        assert "Nothing to organize." in stdout
+
+    def test_unmatched_records_excluded_from_accuracy(
+        self, tmp_path: Path, monkeypatch, capsys
+    ) -> None:
+        fx = tmp_path / "fx"
+        _make_labelled_tree(fx, per_category=1)
+        inbox = tmp_path / "inbox"
+        inbox.mkdir()
+        (inbox / "stray.jpg").write_bytes(b"fake-image-bytes")
+        out = tmp_path / "out"
+
+        class StubBackend:
+            def load(self):
+                return self
+
+            def predict(self, path):
+                return ClassificationResult(
+                    image_path=path, category="cat-memes", confidence=0.9,
+                    backend="stub",
+                )
+
+        monkeypatch.setattr(
+            cli_mod, "get_classifier", lambda backend, threshold=0.45: StubBackend()
+        )
+
+        code = run(
+            _args(input_dir=str(inbox), output=str(out), fixture=str(fx))
+        )
+
+        assert code == 0
+        assert "Fixture accuracy" not in capsys.readouterr().out
+
+    def test_committed_fixture_has_ten_images_two_per_category(self) -> None:
+        from config import CATEGORIES, DEFAULT_FIXTURE_DIR
+
+        assert DEFAULT_FIXTURE_DIR.is_dir(), "run tests/fixtures/make_labeled.py first"
+        for category in CATEGORIES:
+            images = sorted((DEFAULT_FIXTURE_DIR / category).glob("*.jpg"))
+            assert len(images) == 2, f"{category}: expected 2 images"
+
+
+def test_cli_carries_no_floor_logic() -> None:
+    """Story 3.5 boundary: cli renders only, never judges floors."""
+    import ast
+
+    tree = ast.parse(Path(cli_mod.__file__).read_text(encoding="utf-8"))
+    imported: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module == "config":
+            imported.update(alias.name for alias in node.names)
+    assert "ACCURACY_FLOOR" not in imported
+    assert "UNSORTED_SHARE_FLOOR" not in imported

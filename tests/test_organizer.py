@@ -338,3 +338,168 @@ def test_empty_report_is_zeroed() -> None:
     assert report.refused == report.failed == report.skipped == 0
     assert report.errors == []
     assert report.counts_by_category() == {}
+    assert report.fixture_correct == 0
+    assert report.fixture_total == 0
+    assert report.fixture_accuracy is None
+    assert report.unsorted_share == 0.0
+
+
+def _fixture_tree(root: Path) -> dict[str, list[Path]]:
+    """Build a tiny labelled tree: {category: [paths]} with fake bytes."""
+    tree: dict[str, list[Path]] = {}
+    for category in ("cat-memes", "gym-memes"):
+        paths = []
+        for name in ("a.jpg", "b.jpg"):
+            p = root / category / name
+            paths.append(_touch(p))
+        tree[category] = paths
+    return tree
+
+
+class TestReadFixtureLabels:
+    def test_maps_subfolder_name_to_expected_label(self, tmp_path: Path) -> None:
+        tree = _fixture_tree(tmp_path / "fx")
+        labels = organizer_mod.read_fixture_labels(tmp_path / "fx")
+
+        assert labels[tree["cat-memes"][0].resolve()] == "cat-memes"
+        assert labels[tree["gym-memes"][1].resolve()] == "gym-memes"
+        assert len(labels) == 4
+
+    def test_missing_root_returns_empty(self, tmp_path: Path) -> None:
+        assert organizer_mod.read_fixture_labels(tmp_path / "nope") == {}
+
+    def test_files_directly_under_root_are_skipped(self, tmp_path: Path) -> None:
+        _touch(tmp_path / "fx" / "loose.jpg")
+        _touch(tmp_path / "fx" / "cat-memes" / "a.jpg")
+
+        labels = organizer_mod.read_fixture_labels(tmp_path / "fx")
+
+        assert len(labels) == 1
+        assert list(labels.values()) == ["cat-memes"]
+
+    def test_hidden_files_are_skipped(self, tmp_path: Path) -> None:
+        _touch(tmp_path / "fx" / ".hidden" / "secret.jpg")
+        _touch(tmp_path / "fx" / "cat-memes" / "a.jpg")
+
+        labels = organizer_mod.read_fixture_labels(tmp_path / "fx")
+
+        assert len(labels) == 1
+
+
+class TestFixtureAccuracy:
+    def test_accuracy_counts_correct_over_matched(self, tmp_path: Path) -> None:
+        fx = tmp_path / "fx"
+        cat_a = _touch(fx / "cat-memes" / "a.jpg")
+        gym_b = _touch(fx / "gym-memes" / "b.jpg")
+        out = tmp_path / "out"
+
+        report = organize(
+            [
+                OrganizeJob(cat_a, "cat-memes", 0.9),
+                OrganizeJob(gym_b, "cat-memes", 0.9),  # wrong placement
+            ],
+            out,
+            fixture_root=fx,
+        )
+
+        assert report.fixture_total == 2
+        assert report.fixture_correct == 1
+        assert report.fixture_accuracy == pytest.approx(0.5)
+
+    def test_unmatched_records_are_excluded(self, tmp_path: Path) -> None:
+        fx = tmp_path / "fx"
+        inside = _touch(fx / "cat-memes" / "a.jpg")
+        outside = _touch(tmp_path / "elsewhere" / "b.jpg")
+        out = tmp_path / "out"
+
+        report = organize(
+            [
+                OrganizeJob(inside, "cat-memes", 0.9),
+                OrganizeJob(outside, "cat-memes", 0.9),
+            ],
+            out,
+            fixture_root=fx,
+        )
+
+        assert report.fixture_total == 1
+        assert report.fixture_correct == 1
+
+    def test_non_moves_never_count_as_correct(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        fx = tmp_path / "fx"
+        doomed = _touch(fx / "cat-memes" / "doomed.jpg")
+        evil = _touch(fx / "cat-memes" / "evil.jpg")
+        out = tmp_path / "out"
+
+        def boom(source: str, destination: str) -> None:
+            raise OSError("disk on fire")
+
+        monkeypatch.setattr(organizer_mod.shutil, "move", boom)
+
+        report = organize(
+            [
+                OrganizeJob(doomed, "cat-memes", 0.9),  # failed move
+                OrganizeJob(evil, "../../evil", 0.5),  # refused category
+            ],
+            out,
+            fixture_root=fx,
+        )
+
+        # Both sources are under the fixture root so both are matched, but
+        # neither placed correctly: failed + refused are never correct.
+        assert report.fixture_total == 2
+        assert report.fixture_correct == 0
+        assert report.fixture_accuracy == 0.0
+
+    def test_no_fixture_leaves_zeroed_fields(self, tmp_path: Path) -> None:
+        src = _touch(tmp_path / "inbox" / "a.jpg")
+
+        report = organize([OrganizeJob(src, "cat-memes", 0.9)], tmp_path / "out")
+
+        assert report.fixture_total == 0
+        assert report.fixture_correct == 0
+        assert report.fixture_accuracy is None
+
+    def test_dry_run_accuracy_uses_planned_status(self, tmp_path: Path) -> None:
+        fx = tmp_path / "fx"
+        a = _touch(fx / "cat-memes" / "a.jpg")
+        out = tmp_path / "out"
+
+        report = organize(
+            [OrganizeJob(a, "cat-memes", 0.9)],
+            out,
+            dry_run=True,
+            fixture_root=fx,
+        )
+
+        assert report.fixture_total == 1
+        assert report.fixture_correct == 1
+
+    def test_unsorted_share_counts_placed_only(self, tmp_path: Path) -> None:
+        out = tmp_path / "organized"
+        jobs = [
+            OrganizeJob(_touch(tmp_path / "inbox" / "a.jpg"), "cat-memes", 0.9),
+            OrganizeJob(_touch(tmp_path / "inbox" / "b.jpg"), "unsorted", 0.2),
+            OrganizeJob(_touch(tmp_path / "inbox" / "evil.jpg"), "../../evil", 0.5),
+        ]
+
+        report = organize(jobs, out)
+
+        # refused excluded from placed denominator: 1 unsorted / 2 placed
+        assert report.unsorted_share == pytest.approx(0.5)
+
+
+def test_organizer_carries_no_floor_logic() -> None:
+    """Story 3.5 boundary: floors are judged in tests only, never in organizer."""
+    import ast
+
+    tree = ast.parse(Path(organizer_mod.__file__).read_text(encoding="utf-8"))
+    imported: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module == "config":
+            imported.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.Import):
+            imported.update(alias.name.split(".")[0] for alias in node.names)
+    assert "ACCURACY_FLOOR" not in imported
+    assert "UNSORTED_SHARE_FLOOR" not in imported
