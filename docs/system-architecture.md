@@ -58,8 +58,8 @@ inbox/ ──scan_images──▶ [Path] ──classifier.predict──▶ Class
 
 | Backend | Mechanism | Needs training data? | Status |
 |---|---|---|---|
-| `mobilenet` (default) | `tf.keras.applications.MobileNetV2(weights="imagenet")` → ImageNet label → category mapping table (e.g. `barbell → gym-memes`, `tabby/Egyptian_cat → cat-memes`), low max-prob → `unsorted` | No — zero-shot | **Dev Agent TODO** |
-| `custom-cnn` | Lab-reference CNN: `Conv2D → MaxPooling2D → Flatten → Dense(softmax, categorical cross-entropy)`, trained on a user-labeled folder tree, then reused for inference | Yes — user labels a training set | **Dev Agent TODO** |
+| `mobilenet` (default) | `tf.keras.applications.MobileNetV2(weights="imagenet")` → ImageNet label → category mapping table (e.g. `barbell → gym-memes`, `tabby/Egyptian_cat → cat-memes`), low max-prob → `unsorted` | No — zero-shot | Implemented |
+| `custom-cnn` | Lab-reference CNN: `Conv2D → MaxPooling2D → Flatten → Dense(softmax, categorical cross-entropy)`, trained on a user-labeled folder tree, then reused for inference | Yes — user labels a training set | Implemented |
 
 Both implement:
 ```python
@@ -67,9 +67,10 @@ class BaseClassifier(ABC):
     def load(self) -> "BaseClassifier": ...
     def predict(self, image_path: Path) -> ClassificationResult: ...
 ```
-`get_classifier(name)` factory validates against `config.MODEL_BACKENDS`. Missing TensorFlow or
-untrained model raises `NotImplementedError` with a Dev-phase message → `cli` converts it to
-exit code `2` (FR-A8).
+`get_classifier(name)` factory validates against `config.MODEL_BACKENDS`. Missing TensorFlow,
+a missing (or non-five-wide) model artifact, or an unknown backend raises
+`BackendUnavailable` → `cli` converts it to exit code `2` (FR-A8), or to the
+dry-run unsorted fallback under `--dry-run` (FR-A6).
 
 ### 2.4 Organizer Safety Rules (FR-A4..A7, NFR-A2/A3)
 
@@ -77,7 +78,7 @@ exit code `2` (FR-A8).
 2. Destination = `output / category / filename`; if it exists → `stem-1.suffix`, `stem-2.suffix`, … (cap 1000).
 3. Skip-on-error: one failing `shutil.move` is recorded and logged, never aborts the batch.
 4. `OrganizeReport` accumulates `MoveRecord(source, destination, category, confidence, moved)` → summary table (FR-A7).
-5. Scanning ignores hidden dirs and non-image extensions; corrupt images fail at predict-stage and land in `unsorted`/skipped, not fatal (AC-4).
+5. Scanning ignores hidden dirs and non-image extensions; corrupt images fail at predict-stage and land in `unsorted` with their reason recorded, not fatal (AC-4).
 
 ---
 

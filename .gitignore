@@ -8,3 +8,7 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 .venv/
+
+# Trained model artifacts (Story 4.3: never commit weights)
+models/
+*.keras

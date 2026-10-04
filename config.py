@@ -46,7 +46,10 @@ DEFAULT_MODEL_PATH = BASE_DIR / "models" / "custom-cnn.keras"
 # Labelled-fixture default for AC-A6/AC-A7 accuracy checks (AD-12).
 DEFAULT_FIXTURE_DIR = BASE_DIR / "tests" / "fixtures" / "labeled"
 
-# Placement-accuracy floors (OQ-1 first-pass values; Tech Lead calibrates later).
+# Placement-accuracy floors (OQ-1 decided 2026-10-04, Story 4.3: keep first-pass
+# values; real calibration pending labeled real memes — synthetic fixtures
+# cannot measure mapping quality; floors change only on explicit Tech Lead
+# sign-off).
 # AC-A6: accuracy on a labelled fixture must be >= ACCURACY_FLOOR.
 # AC-A7 (counter-metric): unsorted share must be <= UNSORTED_SHARE_FLOOR.
 ACCURACY_FLOOR = 0.6

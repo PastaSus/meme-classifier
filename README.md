@@ -67,7 +67,7 @@ meme-classifier/
 | Specs | PM Agent | Done — `docs/product-requirements.md` |
 | Design | Architect Agent | Done — `docs/system-architecture.md` |
 | Organizer/CLI scaffolding | Tech Lead | Done — fully implemented & tested |
-| MobileNetV2 + custom CNN backends | Dev Agent | **Pending** — marked `NotImplementedError` |
+| MobileNetV2 + custom CNN backends | Dev Agent | Done — both backends implemented & tested (`mobilenet` zero-shot ImageNet mapping; `custom-cnn` via `--model-path` artifact from `--train`) |
 | Adversarial review | QA Agent | Pending |
 
 ## Tests
