@@ -48,13 +48,13 @@ development_status:
   2-3-confidence-threshold-and-category-normalization: done
   epic-2-retrospective: optional
 
-  epic-3: in-progress
-  3-1-collision-free-filing-fr-a4-fr-a5: review
-  3-2-report-contract-with-reasons-fr-a7: review
-  3-3-run-lifecycle-and-exit-codes-fr-a8: review
+  epic-3: done
+  3-1-collision-free-filing-fr-a4-fr-a5: done
+  3-2-report-contract-with-reasons-fr-a7: done
+  3-3-run-lifecycle-and-exit-codes-fr-a8: done
   3-4-dry-run-that-touches-nothing-fr-a6: done
   3-5-fixture-accuracy-and-calibrated-floors: done
-  3-6-idempotency-and-tf-free-qa-suite-nfr-a1-nfr-a3: review
+  3-6-idempotency-and-tf-free-qa-suite-nfr-a1-nfr-a3: done
   epic-3-retrospective: optional
 
   epic-4: backlog
