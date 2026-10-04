@@ -88,7 +88,12 @@ folders using Python's `os` and `shutil` modules.
 ### 2.6 Open Questions
 
 - **OQ-1:** Final values for the AC-A6 accuracy floor and AC-A7 `unsorted` share — calibrated after the first implementation run, Tech Lead sign-off required before QA locks tests.
+  - **Decided 2026-10-04 (Story 4.3):** keep `ACCURACY_FLOOR=0.6` / `UNSORTED_SHARE_FLOOR=0.8`;
+    real calibration pending labeled real memes (synthetic fixtures cannot measure mapping
+    quality). Floors change only on explicit Tech Lead sign-off.
 - **OQ-2:** Is live `--train` demoed at the defense, or is the CNN covered architecture-only? (determines whether FR-A9 is must-demo or must-exist)
+  - **Decided 2026-10-04 (Story 4.3):** live `--train` demoed (seconds, offline-safe) with a
+    pre-built artifact as fallback — FR-A9 is must-demo.
 
 ### 2.7 Glossary
 

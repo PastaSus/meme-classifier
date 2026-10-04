@@ -18,7 +18,7 @@ University case-study CLI: scans a folder of images, classifies meme/reaction pi
 ## Running and verifying
 
 - Never run bare `python` — it's a broken Windows Store stub; use `py` (3.14.6) or `uv`.
-- Tests: `uv run --with pytest pytest -q` (17 tests, ~0.1s).
+- Tests: `uv run --with pytest pytest -q` (158 tests, ~15s).
 - `py main.py data/inbox --dry-run` works without TensorFlow installed.
 
 ## Conventions that differ from defaults
@@ -30,6 +30,6 @@ University case-study CLI: scans a folder of images, classifies meme/reaction pi
 ## Known pitfalls
 
 - README's `python -m pytest -q` fails (pytest not installed in the `py` env) — use `uv run --with pytest pytest -q`.
-- `classifier.py` backends raise `NotImplementedError` (Dev phase pending) — don't assume end-to-end classification works.
+- Both `classifier.py` backends are implemented (`mobilenet` zero-shot; `custom-cnn` via `--train`-built `--model-path` artifact) — end-to-end classification works with TensorFlow installed; without it, non-dry runs exit 2 and `--dry-run` plans everything to `unsorted`.
 
 <!-- /bmad:context -->
