@@ -21,8 +21,9 @@ from classifier import (
     MobileNetV2Classifier,
     PredictFailed,
     get_classifier,
+    train_labeled_model,
 )
-from config import CATEGORIES, CONFIDENCE_THRESHOLD, MODEL_BACKENDS
+from config import CATEGORIES, CONFIDENCE_THRESHOLD, DEFAULT_MODEL_PATH, MODEL_BACKENDS
 
 needs_tf = pytest.mark.skipif(
     importlib.util.find_spec("tensorflow") is None,
@@ -111,10 +112,31 @@ class TestBackendSelection:
         for backend in MODEL_BACKENDS:
             assert get_classifier(backend).name == backend
 
-    def test_custom_cnn_body_is_still_a_stub(self) -> None:
-        # Story 2.1 owned the contract; the custom-CNN body lands in 4.2.
-        with pytest.raises(NotImplementedError):
-            CustomCNNClassifier().load()
+    def test_factory_threads_model_path_to_custom_cnn_only(self) -> None:
+        custom = get_classifier("custom-cnn", model_path="m.keras")
+        assert isinstance(custom, CustomCNNClassifier)
+        assert custom.model_path == Path("m.keras")
+
+        mobile = get_classifier("mobilenet", model_path="m.keras")
+        assert isinstance(mobile, MobileNetV2Classifier)
+
+    def test_custom_cnn_defaults_to_config_model_path(self) -> None:
+        assert CustomCNNClassifier().model_path == Path(DEFAULT_MODEL_PATH)
+        assert get_classifier("custom-cnn").model_path == Path(DEFAULT_MODEL_PATH)
+
+    def test_custom_cnn_missing_artifact_is_unavailable(self, tmp_path: Path) -> None:
+        with pytest.raises(BackendUnavailable, match="artifact not found"):
+            CustomCNNClassifier(tmp_path / "gone.keras").load()
+
+    def test_custom_cnn_garbage_file_is_unavailable(self, tmp_path: Path) -> None:
+        bad = tmp_path / "junk.keras"
+        bad.write_bytes(b"not a keras file")
+        with pytest.raises(BackendUnavailable):
+            CustomCNNClassifier(bad).load()
+
+    def test_custom_cnn_unloaded_predict_raises_stable_failure(self) -> None:
+        with pytest.raises(PredictFailed, match="not loaded"):
+            CustomCNNClassifier().predict(Path("x.jpg"))
 
     def test_exceptions_are_distinct_and_catchable(self) -> None:
         assert issubclass(BackendUnavailable, Exception)
@@ -187,6 +209,75 @@ class TestMobileNetV2TF:
     ) -> None:
         with pytest.raises(PredictFailed):
             mobilenet.predict(tmp_path / "gone.jpg")
+
+
+@needs_tf
+class TestCustomCNNTF:
+    """Story 4.2 (FR-A2, NFR-A4): the 4.1 artifact loads and predicts."""
+
+    def _artifact(self, root: Path, per_category: int = 1) -> Path:
+        colours = [(200, 40, 40), (40, 140, 240), (120, 40, 180), (40, 180, 90)]
+        for index, category in enumerate(CATEGORIES):
+            for slot in range(per_category):
+                _image(
+                    root / category / f"{category}-{slot}.jpg",
+                    colours[index % len(colours)],
+                )
+        model_path = root / "custom-cnn.keras"
+        train_labeled_model(root, model_path)
+        return model_path
+
+    def test_artifact_loads_and_predicts_five_wide(
+        self, tmp_path: Path
+    ) -> None:
+        model_path = self._artifact(tmp_path / "labeled")
+        probe = _image(tmp_path / "probe.jpg", (10, 20, 30))
+
+        clf = CustomCNNClassifier(model_path).load()
+
+        result = clf.predict(probe)
+        assert result.category in {*CATEGORIES, "unsorted"}
+        assert 0.0 <= result.confidence <= 1.0
+        assert len(result.probabilities) == len(CATEGORIES)
+        assert sum(result.probabilities) == pytest.approx(1.0)
+        assert result.backend == "custom-cnn"
+        assert result.raw_label in CATEGORIES
+        assert result.image_path == probe
+
+    def test_zero_threshold_never_routes_to_unsorted(
+        self, tmp_path: Path
+    ) -> None:
+        model_path = self._artifact(tmp_path / "labeled")
+        probe = _image(tmp_path / "probe.jpg", (10, 20, 30))
+
+        result = CustomCNNClassifier(model_path, threshold=0.0).load().predict(probe)
+
+        assert result.category in CATEGORIES
+        assert result.reason is None
+
+    def test_binary_artifact_rejected_as_unavailable(
+        self, tmp_path: Path
+    ) -> None:
+        from tensorflow import keras
+
+        bad = tmp_path / "binary.keras"
+        keras.Sequential(
+            [
+                keras.layers.Input(shape=(64, 64, 3)),
+                keras.layers.Flatten(),
+                keras.layers.Dense(1, activation="sigmoid"),
+            ]
+        ).save(str(bad))
+
+        with pytest.raises(BackendUnavailable, match="outputs"):
+            CustomCNNClassifier(bad).load()
+
+    def test_corrupt_file_raises_stable_failure(self, tmp_path: Path) -> None:
+        model_path = self._artifact(tmp_path / "labeled")
+        clf = CustomCNNClassifier(model_path).load()
+
+        with pytest.raises(PredictFailed, match="unreadable image"):
+            clf.predict(_touch(tmp_path / "bad.jpg"))
 
 
 class TestThresholdRouting:

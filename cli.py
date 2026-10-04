@@ -93,7 +93,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--model-path",
         type=str,
         default=str(DEFAULT_MODEL_PATH),
-        help=f"custom-cnn artifact path (default: {DEFAULT_MODEL_PATH})",
+        help=f"custom-cnn artifact path (custom-cnn only; default: {DEFAULT_MODEL_PATH})",
     )
     parser.add_argument(
         "--dry-run",
@@ -281,10 +281,22 @@ def run(args: argparse.Namespace) -> int:
     print(f"Backend: {args.backend} | threshold: {args.threshold:.2f} | dry-run: {args.dry_run}")
 
     try:
-        classifier = get_classifier(args.backend, threshold=args.threshold).load()
+        if args.backend != "custom-cnn" and str(
+            getattr(args, "model_path", str(DEFAULT_MODEL_PATH))
+        ) != str(DEFAULT_MODEL_PATH):
+            logger.warning(
+                "--model-path is custom-cnn-only; ignoring %s for backend %r",
+                args.model_path,
+                args.backend,
+            )
+        classifier = get_classifier(
+            args.backend,
+            threshold=args.threshold,
+            model_path=getattr(args, "model_path", str(DEFAULT_MODEL_PATH)),
+        ).load()
     except NotImplementedError as exc:
         logger.error("%s", exc)
-        logger.error("Backend not implemented yet — BMAD Dev phase pending.")
+        logger.error("Backend body raised NotImplementedError: %s", exc)
         if args.dry_run:
             return _dry_run_without_backend(args, paths, exc, fixture_root)
         _print_report(empty_report(), args.dry_run)

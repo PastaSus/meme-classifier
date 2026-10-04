@@ -5,6 +5,7 @@ flag wiring, so this suite passes with TensorFlow absent (NFR-A1).
 """
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import pytest
@@ -108,7 +109,7 @@ class TestThresholdWiring:
             def predict(self, path):
                 return predict(path)
 
-        def fake_factory(backend, threshold=0.45):
+        def fake_factory(backend, threshold=0.45, model_path=None):
             captured.update(backend=backend, threshold=threshold)
             return StubBackend()
 
@@ -200,7 +201,7 @@ class TestReportWiring:
                 )
 
         monkeypatch.setattr(
-            cli_mod, "get_classifier", lambda backend, threshold=0.45: StubBackend()
+            cli_mod, "get_classifier", lambda backend, threshold=0.45, model_path=None: StubBackend()
         )
 
         args = _args(input_dir=str(inbox), output=str(tmp_path / "out"), dry_run=True)
@@ -262,7 +263,7 @@ class TestLifecycleAndExitCodes:
 
         monkeypatch.setattr(cli_mod, "scan_images", fake_scan)
         monkeypatch.setattr(
-            cli_mod, "get_classifier", lambda backend, threshold=0.45: StubBackend()
+            cli_mod, "get_classifier", lambda backend, threshold=0.45, model_path=None: StubBackend()
         )
         monkeypatch.setattr(cli_mod, "organize", fake_organize)
         monkeypatch.setattr(cli_mod, "_print_report", fake_print)
@@ -368,7 +369,7 @@ class TestLifecycleAndExitCodes:
         probe.write_bytes(b"fake-image-bytes")
         out = tmp_path / "out"
 
-        def fake_factory(backend, threshold=0.45):
+        def fake_factory(backend, threshold=0.45, model_path=None):
             raise error
 
         def fail_on_move(*args, **kwargs):
@@ -398,7 +399,7 @@ class TestLifecycleAndExitCodes:
         probe.write_bytes(b"fake-image-bytes")
         out = tmp_path / "out"
 
-        def fake_factory(backend, threshold=0.45):
+        def fake_factory(backend, threshold=0.45, model_path=None):
             raise error
 
         monkeypatch.setattr(cli_mod, "get_classifier", fake_factory)
@@ -424,7 +425,7 @@ class TestLifecycleAndExitCodes:
         (out / "unsorted").mkdir(parents=True)
         (out / "unsorted" / "cat.jpg").write_bytes(b"already-filed")
 
-        def fake_factory(backend, threshold=0.45):
+        def fake_factory(backend, threshold=0.45, model_path=None):
             raise BackendUnavailable("TensorFlow unavailable")
 
         monkeypatch.setattr(cli_mod, "get_classifier", fake_factory)
@@ -443,7 +444,7 @@ class TestLifecycleAndExitCodes:
         _make_labelled_tree(fx, per_category=2)
         out = tmp_path / "out"
 
-        def fake_factory(backend, threshold=0.45):
+        def fake_factory(backend, threshold=0.45, model_path=None):
             raise BackendUnavailable("TensorFlow unavailable")
 
         monkeypatch.setattr(cli_mod, "get_classifier", fake_factory)
@@ -489,7 +490,7 @@ class TestLifecycleAndExitCodes:
             )
 
         monkeypatch.setattr(
-            cli_mod, "get_classifier", lambda backend, threshold=0.45: StubBackend()
+            cli_mod, "get_classifier", lambda backend, threshold=0.45, model_path=None: StubBackend()
         )
         monkeypatch.setattr(cli_mod, "organize", fake_organize)
 
@@ -580,7 +581,7 @@ class TestFixtureWiring:
                 )
 
         monkeypatch.setattr(
-            cli_mod, "get_classifier", lambda backend, threshold=0.45: StubBackend()
+            cli_mod, "get_classifier", lambda backend, threshold=0.45, model_path=None: StubBackend()
         )
 
         code = run(
@@ -605,7 +606,7 @@ class TestFixtureWiring:
         out = tmp_path / "out"
         monkeypatch.setattr(
             cli_mod, "get_classifier",
-            lambda backend, threshold=0.45: _ParentNameBackend(fx),
+            lambda backend, threshold=0.45, model_path=None: _ParentNameBackend(fx),
         )
 
         code = run(
@@ -643,7 +644,7 @@ class TestFixtureWiring:
 
         monkeypatch.setattr(
             cli_mod, "get_classifier",
-            lambda backend, threshold=0.45: _ParentNameBackend(fx),
+            lambda backend, threshold=0.45, model_path=None: _ParentNameBackend(fx),
         )
         monkeypatch.setattr(cli_mod, "organize", spy_organize)
 
@@ -678,7 +679,7 @@ class TestFixtureWiring:
         _make_labelled_tree(fx, per_category=1)
         out = tmp_path / "out"
 
-        def fake_factory(backend, threshold=0.45):
+        def fake_factory(backend, threshold=0.45, model_path=None):
             raise BackendUnavailable("TensorFlow unavailable")
 
         def fail_on_move(*args, **kwargs):
@@ -720,7 +721,7 @@ class TestFixtureWiring:
                 )
 
         monkeypatch.setattr(
-            cli_mod, "get_classifier", lambda backend, threshold=0.45: StubBackend()
+            cli_mod, "get_classifier", lambda backend, threshold=0.45, model_path=None: StubBackend()
         )
 
         code = run(
@@ -789,7 +790,7 @@ class TestIdempotency:
         out = tmp_path / "out"
         monkeypatch.setattr(
             cli_mod, "get_classifier",
-            lambda backend, threshold=0.45: _FixedCategoryBackend(),
+            lambda backend, threshold=0.45, model_path=None: _FixedCategoryBackend(),
         )
 
         assert run(_args(input_dir=str(inbox), output=str(out))) == 0
@@ -811,7 +812,7 @@ class TestIdempotency:
         out = tmp_path / "out"
         monkeypatch.setattr(
             cli_mod, "get_classifier",
-            lambda backend, threshold=0.45: _FixedCategoryBackend(),
+            lambda backend, threshold=0.45, model_path=None: _FixedCategoryBackend(),
         )
 
         assert run(_args(input_dir=str(inbox), output=str(out))) == 0
@@ -839,7 +840,7 @@ class TestIdempotency:
         before = _snapshot_tree(inbox)
         monkeypatch.setattr(
             cli_mod, "get_classifier",
-            lambda backend, threshold=0.45: _FixedCategoryBackend(),
+            lambda backend, threshold=0.45, model_path=None: _FixedCategoryBackend(),
         )
 
         assert run(_args(input_dir=str(inbox), output=str(out), dry_run=True)) == 0
@@ -866,7 +867,7 @@ class TestIdempotency:
 
         monkeypatch.setattr(
             cli_mod, "get_classifier",
-            lambda backend, threshold=0.45: FlakyBackend(),
+            lambda backend, threshold=0.45, model_path=None: FlakyBackend(),
         )
 
         assert run(_args(input_dir=str(inbox), output=str(out))) == 0
@@ -1118,3 +1119,63 @@ class TestTrainSlot:
         assert "Nothing to organize." in stdout
         assert "planned: 0 | moved: 0 | skipped: 0 | refused: 0 | failed: 0" in stdout
         assert not (tmp_path / "out").exists()
+
+
+class TestCustomCNNWiring:
+    """Story 4.2 (FR-A2, NFR-A4): --model-path reaches the factory."""
+
+    def test_model_path_reaches_factory_and_missing_artifact_exits_2(
+        self, tmp_path: Path, monkeypatch, capsys
+    ) -> None:
+        inbox = tmp_path / "inbox"
+        inbox.mkdir()
+        (inbox / "meme.jpg").write_bytes(b"fake-image-bytes")
+        out = tmp_path / "out"
+        model_path = tmp_path / "gone.keras"
+        seen: dict = {}
+
+        def spy_factory(backend, threshold=0.45, model_path=None):
+            seen["backend"] = backend
+            seen["model_path"] = model_path
+            raise BackendUnavailable("custom-cnn artifact not found")
+
+        monkeypatch.setattr(cli_mod, "get_classifier", spy_factory)
+
+        args = _args(
+            input_dir=str(inbox),
+            output=str(out),
+            backend="custom-cnn",
+            model_path=str(model_path),
+        )
+        assert run(args) == 2
+
+        assert seen["backend"] == "custom-cnn"
+        assert Path(seen["model_path"]) == model_path
+        stdout = capsys.readouterr().out
+        assert "Nothing to organize." in stdout
+        assert "planned: 0 | moved: 0 | skipped: 0 | refused: 0 | failed: 0" in stdout
+        assert (inbox / "meme.jpg").is_file()  # no partial moves
+        assert not out.exists()
+
+    def test_model_path_with_other_backend_warns_and_ignores(
+        self, tmp_path: Path, monkeypatch, caplog
+    ) -> None:
+        inbox = tmp_path / "inbox"
+        inbox.mkdir()
+        (inbox / "meme.jpg").write_bytes(b"fake-image-bytes")
+
+        def spy_factory(backend, threshold=0.45, model_path=None):
+            raise BackendUnavailable("TF unavailable")
+
+        monkeypatch.setattr(cli_mod, "get_classifier", spy_factory)
+
+        args = _args(
+            input_dir=str(inbox),
+            output=str(tmp_path / "out"),
+            backend="mobilenet",
+            model_path=str(tmp_path / "m.keras"),
+        )
+        with caplog.at_level(logging.WARNING, logger="cli"):
+            assert run(args) == 2
+
+        assert "--model-path is custom-cnn-only" in caplog.text

@@ -9,8 +9,8 @@ Two backends from the lab reference sheet share one ABC contract:
                      folders.
 
 ``mobilenet`` is implemented (ImageNet inference + label mapping); the
-``custom-cnn`` body is intentionally left to the Dev Agent (BMAD Phase 4) and
-raises NotImplementedError with an explicit marker.
+``custom-cnn`` body loads a Story 4.1 ``.keras`` artifact and predicts a
+five-element distribution over ``config.CATEGORIES``.
 """
 from __future__ import annotations
 
@@ -23,14 +23,13 @@ from pathlib import Path
 from config import (
     CATEGORIES,
     CONFIDENCE_THRESHOLD,
+    DEFAULT_MODEL_PATH,
     IMAGE_EXTENSIONS,
     IMAGENET_LABEL_TO_CATEGORY,
     MODEL_BACKENDS,
 )
 
 logger = logging.getLogger(__name__)
-
-DEV_TODO = "[DEV Agent TODO — BMAD Phase 4]"
 
 
 class BackendUnavailable(Exception):
@@ -175,34 +174,98 @@ class CustomCNNClassifier(BaseClassifier):
     """Lab reference: custom CNN built with TensorFlow/Keras.
 
     Architecture (per lab sheet): Conv2D -> MaxPooling2D -> Flatten -> Dense,
-    trained with categorical cross-entropy on labelled category folders.
+    trained with categorical cross-entropy on labelled category folders
+    (Story 4.1 ``train_labeled_model``). Inference mirrors training
+    preprocessing (64px RGB, /255) and returns the five-element softmax
+    distribution over ``config.CATEGORIES``; the shared ``route()`` policy
+    applies threshold handling exactly like the mobilenet backend.
     """
 
     name = "custom-cnn"
 
     def __init__(
-        self, model_path: Path | None = None, threshold: float = CONFIDENCE_THRESHOLD
+        self, model_path: Path | str | None = None, threshold: float = CONFIDENCE_THRESHOLD
     ) -> None:
         super().__init__(threshold=threshold)
-        self.model_path = model_path
+        # AD-11: the default resolves to the single config literal; an
+        # explicit --model-path always wins (threaded via get_classifier).
+        self.model_path = (
+            Path(model_path) if model_path is not None else Path(DEFAULT_MODEL_PATH)
+        )
         self._model = None
 
     def load(self) -> "CustomCNNClassifier":
-        # TODO(Dev Agent): build/compile the CNN (or load a saved model from
-        #                   self.model_path) with categorical cross-entropy.
-        raise NotImplementedError(
-            f"{DEV_TODO} Build the CNN in CustomCNNClassifier.load(). "
-            "See docs/system-architecture.md section 2.3."
-        )
+        """Load a Story 4.1 ``.keras`` artifact (AD-10).
+
+        Missing files and artifacts whose output is not five-wide (e.g.
+        binary heads) are rejected as unavailable — cli maps that to exit 2
+        (or the dry-run unsorted fallback), never a traceback.
+        """
+        # Missing-file check first (stdlib): precise "artifact not found"
+        # with or without TensorFlow installed.
+        if not self.model_path.is_file():
+            raise BackendUnavailable(
+                f"custom-cnn artifact not found: {self.model_path}"
+            )
+        try:
+            from tensorflow import keras
+        except Exception as exc:
+            raise BackendUnavailable(f"TensorFlow unavailable: {exc}") from exc
+        try:
+            self._model = keras.models.load_model(str(self.model_path))
+        except Exception as exc:
+            raise BackendUnavailable(
+                f"custom-cnn load failed for {self.model_path}: {exc}"
+            ) from exc
+        width = self._model.output_shape[-1]
+        if width != len(CATEGORIES):
+            self._model = None
+            raise BackendUnavailable(
+                f"custom-cnn artifact has {width} outputs, "
+                f"expected {len(CATEGORIES)} ({', '.join(CATEGORIES)})"
+            )
+        return self
 
     def predict(self, image_path: Path) -> ClassificationResult:
-        # TODO(Dev Agent): resize/normalize image -> model.predict ->
-        #                   argmax over class indices -> category + confidence,
-        #                   then pass the mapped category through
-        #                   BaseClassifier.route (Story 2.3) so threshold and
-        #                   normalization stay in one place for every backend.
-        raise NotImplementedError(
-            f"{DEV_TODO} Implement inference in CustomCNNClassifier.predict()."
+        """Preprocess (mirror of training) → predict → top-1 → shared routing."""
+        path = Path(image_path)
+        if self._model is None:
+            raise PredictFailed("custom-cnn backend not loaded (call load() first)")
+        try:
+            import numpy as np
+            from PIL import Image
+        except Exception as exc:
+            raise PredictFailed(f"image dependencies unavailable: {exc}") from exc
+        try:
+            with Image.open(path) as img:
+                arr = np.asarray(
+                    img.convert("RGB").resize(
+                        (_TRAIN_IMAGE_SIZE, _TRAIN_IMAGE_SIZE)
+                    ),
+                    dtype=np.float32,
+                )
+        except Exception as exc:
+            raise PredictFailed(f"unreadable image {path.name}: {exc}") from exc
+        try:
+            probs = self._model.predict(
+                np.expand_dims(arr / 255.0, 0), verbose=0
+            )[0]
+            distribution = tuple(float(p) for p in probs)
+            top = int(np.argmax(probs))
+            raw_label = CATEGORIES[top]
+            confidence = distribution[top]
+        except Exception as exc:
+            raise PredictFailed(f"inference failed for {path.name}: {exc}") from exc
+
+        final, reason = self.route(raw_label, confidence, raw_label=raw_label)
+        return ClassificationResult(
+            image_path=path,
+            category=final,
+            confidence=confidence,
+            backend=self.name,
+            raw_label=raw_label,
+            reason=reason,
+            probabilities=distribution,
         )
 
 
@@ -361,17 +424,22 @@ def train_labeled_model(
 
 
 def get_classifier(
-    backend: str, threshold: float = CONFIDENCE_THRESHOLD
+    backend: str,
+    threshold: float = CONFIDENCE_THRESHOLD,
+    model_path: Path | str | None = None,
 ) -> BaseClassifier:
     """Factory validated against config.MODEL_BACKENDS (FR-A2).
 
     *threshold* flows into the backend so routing stays in one place (AD-10).
-    Names outside the config allow-list raise BackendUnavailable, which the CLI
-    maps to exit 2 instead of a traceback.
+    *model_path* flows into the custom-cnn backend only (FR-A2, NFR-A4);
+    other backends ignore it. Names outside the config allow-list raise
+    BackendUnavailable, which the CLI maps to exit 2 instead of a traceback.
     """
     if backend not in MODEL_BACKENDS or backend not in _BACKENDS:
         raise BackendUnavailable(
             f"Unknown backend {backend!r}. Choose from: {sorted(_BACKENDS)}"
         )
     logger.debug("Selected backend: %s", backend)
+    if backend == CustomCNNClassifier.name:
+        return CustomCNNClassifier(model_path=model_path, threshold=threshold)
     return _BACKENDS[backend](threshold=threshold)
