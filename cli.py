@@ -11,7 +11,7 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from classifier import get_classifier
+from classifier import BackendUnavailable, get_classifier, train_labeled_model
 from config import (
     CONFIDENCE_THRESHOLD,
     DEFAULT_BACKEND,
@@ -173,11 +173,73 @@ def _dry_run_without_backend(
     return 0
 
 
+def _run_train(args: argparse.Namespace, train_root: Path) -> int:
+    """Epic 4 train slot (FR-A9): fit the lab CNN, then return (AD-13).
+
+    Runs before scanning and needs no inbox: input/output/fixture validation
+    and the scan/organize loop are skipped — training prints its own summary
+    and returns. A missing root exits 1 in every mode (validation precedes
+    the dry-run skip); dry-run skips with a warning and zero writes (exit 0);
+    TF/model failures exit 2.
+    """
+    model_path = Path(getattr(args, "model_path", str(DEFAULT_MODEL_PATH)))
+    if not train_root.is_dir():
+        logger.error("Training root does not exist: %s", train_root.resolve())
+        _print_report(empty_report(), args.dry_run)
+        return 1
+    if args.dry_run:
+        print(
+            f"Warning: --train {train_root} skipped "
+            "(--dry-run requested) — no model written"
+        )
+        logger.warning("dry-run: skipping training on %s", train_root)
+        _print_report(empty_report(), True)
+        return 0
+    try:
+        info = train_labeled_model(train_root, model_path)
+    except (FileNotFoundError, NotADirectoryError, ValueError) as exc:
+        logger.error("Training data error: %s", exc)
+        _print_report(empty_report(), args.dry_run)
+        return 1
+    except BackendUnavailable as exc:
+        logger.error("Training failed: %s", exc)
+        _print_report(empty_report(), args.dry_run)
+        return 2
+    except Exception as exc:  # TF/model failure bucket (AD-8 exit-2 semantics)
+        logger.error("Training failed: %s", exc)
+        _print_report(empty_report(), args.dry_run)
+        return 2
+    saved = info["model_path"]
+    print(
+        f"Training custom-cnn on {info['samples']} image(s) from {train_root} "
+        f"(epochs={info['epochs']}, batch={info['batch_size']}, "
+        f"image={info['image_size']}x{info['image_size']})"
+    )
+    print(f"Saved model artifact to {saved}")
+    print(
+        f"Training complete: {info['samples']} samples across "
+        f"{len(info['per_category'])} categories -> {saved}"
+    )
+    return 0
+
+
 def run(args: argparse.Namespace) -> int:
     # AD-13 lifecycle: parse → train? → scan → empty-check → load → organize
-    # → render. (`parse` lives in main()/argparse; the `train?` slot belongs
-    # to Epic 4 and is reserved here with no behavior yet.) A report prints
-    # before every return below (FR-A7/FR-A8).
+    # → render. (`parse` lives in main()/argparse; the `train?` slot below
+    # belongs to Epic 4.) A report prints before every return below, except
+    # the successful train path which prints its own summary (FR-A7/FR-A8).
+    train_raw = getattr(args, "train", None)
+    if train_raw is not None and str(train_raw) == "":
+        # An explicitly-passed empty --train is a missing root, not a
+        # normal run: fail loudly instead of training on the CWD (E1).
+        logger.error("Training root does not exist: %s", train_raw)
+        _print_report(empty_report(), args.dry_run)
+        return 1
+    if train_raw is not None:
+        # Training runs first and needs no inbox: return before any
+        # input/output/fixture validation or scanning (FR-A9).
+        return _run_train(args, Path(str(train_raw)))
+
     input_dir = Path(args.input_dir)
     if not input_dir.is_dir():
         logger.error("Input directory does not exist: %s", input_dir.resolve())

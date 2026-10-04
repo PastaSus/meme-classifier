@@ -898,3 +898,223 @@ def test_cli_module_is_stdlib_only() -> None:
         imported - set(sys.stdlib_module_names) - {"classifier", "config", "organizer"}
     )
     assert third_party == set(), f"non-stdlib imports: {sorted(third_party)}"
+
+
+def _fake_train_info(model_path: Path, samples: int = 10) -> dict:
+    """Stand-in for classifier.train_labeled_model's summary (TF-free)."""
+    from config import CATEGORIES
+
+    return {
+        "samples": samples,
+        "epochs": 5,
+        "batch_size": 16,
+        "image_size": 64,
+        "per_category": {category: 2 for category in CATEGORIES},
+        "model_path": Path(model_path).resolve(),
+    }
+
+
+class TestTrainSlot:
+    """Story 4.1 (FR-A9): --train lifecycle slot mechanics.
+
+    TF-free: the train function is monkeypatched, so no TensorFlow is needed
+    (NFR-A1). The real fit lives in tests/test_train.py (TF-gated).
+    """
+
+    def test_train_runs_first_and_skips_scan_and_organize(
+        self, tmp_path: Path, monkeypatch, capsys
+    ) -> None:
+        train_root = tmp_path / "labeled"
+        train_root.mkdir()
+        model_path = tmp_path / "models" / "custom-cnn.keras"
+        calls: list[str] = []
+
+        def fake_train(root, dest):
+            calls.append("train")
+            assert Path(root) == train_root
+            assert Path(dest) == model_path
+            return _fake_train_info(model_path)
+
+        def boom(*args, **kwargs):
+            raise AssertionError("scan/organize must not run in train mode")
+
+        monkeypatch.setattr(cli_mod, "train_labeled_model", fake_train)
+        monkeypatch.setattr(cli_mod, "scan_images", boom)
+        monkeypatch.setattr(cli_mod, "organize", boom)
+
+        # Missing inbox proves training needs no inbox (FR-A9).
+        missing_inbox = tmp_path / "no-inbox"
+        args = _args(
+            input_dir=str(missing_inbox),
+            output=str(tmp_path / "out"),
+            train=str(train_root),
+            model_path=str(model_path),
+        )
+        assert run(args) == 0
+        assert calls == ["train"]
+
+        stdout = capsys.readouterr().out
+        assert "Training custom-cnn on 10 image(s)" in stdout
+        assert "Saved model artifact to " in stdout
+        assert "Training complete: 10 samples" in stdout
+        assert not (tmp_path / "out").exists()  # organize loop never ran
+
+    def test_train_dry_run_warns_skips_and_writes_nothing(
+        self, tmp_path: Path, monkeypatch, capsys
+    ) -> None:
+        train_root = tmp_path / "labeled"
+        train_root.mkdir()
+        model_path = tmp_path / "models" / "custom-cnn.keras"
+
+        def boom(root, dest):
+            raise AssertionError("train must not run under --dry-run")
+
+        monkeypatch.setattr(cli_mod, "train_labeled_model", boom)
+
+        args = _args(
+            input_dir=str(tmp_path / "no-inbox"),
+            output=str(tmp_path / "out"),
+            train=str(train_root),
+            model_path=str(model_path),
+            dry_run=True,
+        )
+        assert run(args) == 0
+
+        stdout = capsys.readouterr().out
+        assert "Warning" in stdout and "--train" in stdout
+        assert "Nothing to organize." in stdout
+        assert not model_path.exists()  # zero writes anywhere
+        assert not (tmp_path / "out").exists()
+
+    def test_train_empty_string_root_exits_1(
+        self, tmp_path: Path, monkeypatch, capsys
+    ) -> None:
+        def boom(root, dest):
+            raise AssertionError("train must not run on an empty root")
+
+        monkeypatch.setattr(cli_mod, "train_labeled_model", boom)
+
+        args = _args(
+            input_dir=str(tmp_path / "no-inbox"),
+            output=str(tmp_path / "out"),
+            train="",
+            model_path=str(tmp_path / "m.keras"),
+        )
+        assert run(args) == 1
+
+        stdout = capsys.readouterr().out
+        assert "Nothing to organize." in stdout
+        assert "planned: 0 | moved: 0 | skipped: 0 | refused: 0 | failed: 0" in stdout
+
+    def test_train_missing_root_exits_1_with_zeroed_report(        self, tmp_path: Path, monkeypatch, capsys
+    ) -> None:
+        def boom(root, dest):
+            raise AssertionError("train must not run on a missing root")
+
+        monkeypatch.setattr(cli_mod, "train_labeled_model", boom)
+
+        args = _args(
+            input_dir=str(tmp_path / "no-inbox"),
+            output=str(tmp_path / "out"),
+            train=str(tmp_path / "no-train-root"),
+            model_path=str(tmp_path / "m.keras"),
+        )
+        assert run(args) == 1
+
+        stdout = capsys.readouterr().out
+        assert "Nothing to organize." in stdout
+        assert "planned: 0 | moved: 0 | skipped: 0 | refused: 0 | failed: 0" in stdout
+        assert not (tmp_path / "out").exists()  # before side effects
+
+    def test_train_no_images_exits_1(
+        self, tmp_path: Path, monkeypatch, capsys
+    ) -> None:
+        train_root = tmp_path / "labeled"
+        train_root.mkdir()
+
+        def fake_train(root, dest):
+            raise ValueError(f"No training images found under {root}")
+
+        monkeypatch.setattr(cli_mod, "train_labeled_model", fake_train)
+
+        args = _args(
+            input_dir=str(tmp_path / "no-inbox"),
+            output=str(tmp_path / "out"),
+            train=str(train_root),
+            model_path=str(tmp_path / "m.keras"),
+        )
+        assert run(args) == 1
+
+        stdout = capsys.readouterr().out
+        assert "Nothing to organize." in stdout
+        assert "planned: 0 | moved: 0 | skipped: 0 | refused: 0 | failed: 0" in stdout
+
+    def test_train_backend_failure_exits_2_with_zeroed_report(
+        self, tmp_path: Path, monkeypatch, capsys
+    ) -> None:
+        train_root = tmp_path / "labeled"
+        train_root.mkdir()
+        model_path = tmp_path / "m.keras"
+
+        def fake_train(root, dest):
+            raise BackendUnavailable("TensorFlow unavailable")
+
+        monkeypatch.setattr(cli_mod, "train_labeled_model", fake_train)
+
+        args = _args(
+            input_dir=str(tmp_path / "no-inbox"),
+            output=str(tmp_path / "out"),
+            train=str(train_root),
+            model_path=str(model_path),
+        )
+        assert run(args) == 2
+
+        stdout = capsys.readouterr().out
+        assert "Nothing to organize." in stdout
+        assert "planned: 0 | moved: 0 | skipped: 0 | refused: 0 | failed: 0" in stdout
+        assert not model_path.exists()  # no partial artifact relied upon
+
+    def test_train_unexpected_model_failure_exits_2(
+        self, tmp_path: Path, monkeypatch, capsys
+    ) -> None:
+        train_root = tmp_path / "labeled"
+        train_root.mkdir()
+
+        def fake_train(root, dest):
+            raise RuntimeError("fit exploded")
+
+        monkeypatch.setattr(cli_mod, "train_labeled_model", fake_train)
+
+        args = _args(
+            input_dir=str(tmp_path / "no-inbox"),
+            output=str(tmp_path / "out"),
+            train=str(train_root),
+            model_path=str(tmp_path / "m.keras"),
+        )
+        assert run(args) == 2
+
+        assert "Nothing to organize." in capsys.readouterr().out
+
+    def test_train_missing_root_with_dry_run_exits_1(
+        self, tmp_path: Path, monkeypatch, capsys
+    ) -> None:
+        # Root validation precedes the dry-run skip: a missing root exits 1
+        # in every mode.
+        def boom(root, dest):
+            raise AssertionError("train must not run on a missing root")
+
+        monkeypatch.setattr(cli_mod, "train_labeled_model", boom)
+
+        args = _args(
+            input_dir=str(tmp_path / "no-inbox"),
+            output=str(tmp_path / "out"),
+            train=str(tmp_path / "no-train-root"),
+            model_path=str(tmp_path / "m.keras"),
+            dry_run=True,
+        )
+        assert run(args) == 1
+
+        stdout = capsys.readouterr().out
+        assert "Nothing to organize." in stdout
+        assert "planned: 0 | moved: 0 | skipped: 0 | refused: 0 | failed: 0" in stdout
+        assert not (tmp_path / "out").exists()
