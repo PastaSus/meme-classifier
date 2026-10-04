@@ -62,6 +62,8 @@ class OrganizeReport:
     """Aggregated result of an organize run (FR-A7)."""
 
     records: list[MoveRecord] = field(default_factory=list)
+    fixture_correct: int = 0
+    fixture_total: int = 0
 
     @property
     def moved(self) -> int:
@@ -88,6 +90,29 @@ class OrganizeReport:
         """Non-move records (refused/failed/skipped) carrying reasons (AR-7)."""
         return [r for r in self.records if r.status in _NON_MOVE_STATUSES]
 
+    @property
+    def fixture_accuracy(self) -> float | None:
+        """Placement accuracy on the labelled fixture, or None when no fixture.
+
+        Tests compare this against config floors; organizer never enforces them.
+        """
+        if self.fixture_total == 0:
+            return None
+        return self.fixture_correct / self.fixture_total
+
+    @property
+    def unsorted_share(self) -> float:
+        """Share of placed records filed as unsorted (AC-A7 counter-metric).
+
+        Tests compare this against the configured floor; organizer never
+        enforces it.
+        """
+        placed = self.moved + self.planned
+        if placed == 0:
+            return 0.0
+        unsorted = self.counts_by_category().get("unsorted", 0)
+        return unsorted / placed
+
     def counts_by_category(self) -> dict[str, int]:
         counts: dict[str, int] = {}
         for record in self.records:
@@ -100,6 +125,35 @@ class OrganizeReport:
 def empty_report() -> OrganizeReport:
     """Zeroed report for early exits (AR-7): cli renders this, never builds one."""
     return OrganizeReport()
+
+
+def read_fixture_labels(root: Path | str) -> dict[Path, str]:
+    """Map fixture image paths to expected labels (AD-12, FR-A7).
+
+    The immediate subfolder name under *root* is the expected category:
+    ``<root>/<category>/image.jpg`` -> ``{resolved_path: "<category>"}``.
+    Stdlib-only (pathlib). Missing roots yield ``{}`` so ``organize()``
+    degrades to no-accuracy instead of crashing; cli owns explicit-root
+    validation. Hidden files/dirs and files sitting directly under *root*
+    (no label part) are skipped.
+    """
+    root_path = Path(root).resolve()
+    if not root_path.is_dir():
+        return {}
+    labels: dict[Path, str] = {}
+    for path in root_path.rglob("*"):
+        if not path.is_file():
+            continue
+        try:
+            relative = path.resolve().relative_to(root_path)
+        except (ValueError, OSError):
+            continue
+        if not relative.parts or len(relative.parts) < 2:
+            continue
+        if any(part.startswith(".") for part in relative.parts):
+            continue
+        labels[path.resolve()] = relative.parts[0]
+    return labels
 
 
 def _has_hidden_part(root: Path, path: Path) -> bool:
@@ -194,6 +248,7 @@ def organize(
     output_dir: Path,
     dry_run: bool = False,
     allowed: Collection[str] | None = None,
+    fixture_root: Path | str | None = None,
 ) -> OrganizeReport:
     """Move classified images into labelled subfolders (FR-A4, FR-A6).
 
@@ -204,10 +259,28 @@ def organize(
     changes occur — records are reported as "planned", and planned names are
     reserved in a virtual in-memory tree so same-basename jobs plan
     cat.jpg, cat-1.jpg, ... without touching disk (FR-A6).
+
+    With *fixture_root*, placement accuracy is computed into
+    ``report.fixture_correct``/``report.fixture_total`` by comparing each
+    record's placed category against ``read_fixture_labels()`` expectations.
+    Records whose source is not under the fixture root are excluded. Only
+    moved/planned records can count as correct; refused/failed/skipped never
+    do. No floor enforcement lives here — the report carries numbers, tests
+    judge (Story 3.5).
     """
     out_root = Path(output_dir)
     report = OrganizeReport()
     reserved: set[Path] = set()
+
+    # Snapshot expectations BEFORE any move: a real run files images OUT of
+    # the fixture root (inbox == fixture root), so a post-move rglob would
+    # find nothing. Records keep their original source paths for lookup.
+    expected: dict[Path, str] = {}
+    if fixture_root:
+        try:
+            expected = read_fixture_labels(fixture_root)
+        except OSError:
+            expected = {}
 
     for job in jobs:
         source = Path(job.source)
@@ -279,5 +352,25 @@ def organize(
             MoveRecord(source, destination, category, job.confidence, STATUS_MOVED, detail)
         )
         logger.debug("Moved %s -> %s", source, destination)
+
+    if fixture_root:
+        correct = 0
+        total = 0
+        for record in report.records:
+            try:
+                key = Path(record.source).resolve()
+            except OSError:
+                continue
+            label = expected.get(key)
+            if label is None:
+                continue  # UNMATCHED_RECORD: not under the fixture root
+            total += 1
+            if (
+                record.category == label
+                and record.status in (STATUS_MOVED, STATUS_PLANNED)
+            ):
+                correct += 1
+        report.fixture_correct = correct
+        report.fixture_total = total
 
     return report
