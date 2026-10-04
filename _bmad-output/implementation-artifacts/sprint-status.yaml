@@ -52,7 +52,7 @@ development_status:
   3-1-collision-free-filing-fr-a4-fr-a5: review
   3-2-report-contract-with-reasons-fr-a7: review
   3-3-run-lifecycle-and-exit-codes-fr-a8: review
-  3-4-dry-run-that-touches-nothing-fr-a6: review
+  3-4-dry-run-that-touches-nothing-fr-a6: done
   3-5-fixture-accuracy-and-calibrated-floors: backlog
   3-6-idempotency-and-tf-free-qa-suite-nfr-a1-nfr-a3: backlog
   epic-3-retrospective: optional
