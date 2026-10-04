@@ -160,16 +160,23 @@ def sanitize_category(category: str, allowed: Collection[str] | None = None) -> 
     return cleaned
 
 
-def unique_destination(directory: Path, filename: str) -> Path:
-    """Return a non-colliding destination path (FR-A5): file.jpg, file-1.jpg, ..."""
+def unique_destination(
+    directory: Path, filename: str, reserved: Collection[Path] | None = None
+) -> Path:
+    """Return a non-colliding destination path (FR-A5): file.jpg, file-1.jpg, ...
+
+    *reserved* holds already-planned paths that do not exist on disk yet (the
+    dry-run virtual tree, FR-A6) — they count as taken alongside real files.
+    """
+    taken = set(reserved) if reserved else set()
     candidate = directory / filename
-    if not candidate.exists():
+    if not candidate.exists() and candidate not in taken:
         return candidate
     stem = Path(filename).stem
     suffix = Path(filename).suffix
     for index in range(1, MAX_COLLISION_SUFFIX + 1):
         alternative = directory / f"{stem}-{index}{suffix}"
-        if not alternative.exists():
+        if not alternative.exists() and alternative not in taken:
             return alternative
     raise FileExistsError(
         f"Could not find a free name for {filename!r} in {directory} "
@@ -194,10 +201,13 @@ def organize(
     are recorded without aborting the batch: policy rejections are *refused*,
     move-phase errors are *failed*, jobs that never reach the move (missing
     source, exhausted suffixes) are *skipped*. With *dry_run* no filesystem
-    changes occur — records are reported as "planned".
+    changes occur — records are reported as "planned", and planned names are
+    reserved in a virtual in-memory tree so same-basename jobs plan
+    cat.jpg, cat-1.jpg, ... without touching disk (FR-A6).
     """
     out_root = Path(output_dir)
     report = OrganizeReport()
+    reserved: set[Path] = set()
 
     for job in jobs:
         source = Path(job.source)
@@ -229,7 +239,9 @@ def organize(
             continue
 
         try:
-            destination = unique_destination(out_root / category, source.name)
+            destination = unique_destination(
+                out_root / category, source.name, reserved if dry_run else None
+            )
         except FileExistsError as exc:
             report.records.append(
                 MoveRecord(
@@ -240,6 +252,7 @@ def organize(
             continue
 
         if dry_run:
+            reserved.add(destination)
             report.records.append(
                 MoveRecord(source, destination, category, job.confidence, STATUS_PLANNED, detail)
             )

@@ -145,6 +145,26 @@ def _print_report(report: OrganizeReport, dry_run: bool) -> None:
             print(f"    [{record.status}] {record.source.name}: {record.detail or record.category}")
 
 
+def _dry_run_without_backend(
+    args: argparse.Namespace, paths: list[Path], exc: Exception
+) -> int:
+    """Plan every scanned file to unsorted when load() fails under --dry-run.
+
+    FR-A6/AC-A9: a preview survives a broken environment — no backend call, a
+    visible warning, everything planned to unsorted, exit 0.
+    """
+    reason = f"backend unavailable: {exc}"
+    print(f"Warning: backend {args.backend!r} unavailable ({exc}) — planning {len(paths)} file(s) to unsorted")
+    logger.warning("%s — dry-run fallback to unsorted", reason)
+    jobs = [
+        OrganizeJob(source=path, category="unsorted", confidence=0.0, reason=reason)
+        for path in paths
+    ]
+    report = organize(jobs, Path(args.output), dry_run=True)
+    _print_report(report, True)  # FR-A7
+    return 0
+
+
 def run(args: argparse.Namespace) -> int:
     # AD-13 lifecycle: parse → train? → scan → empty-check → load → organize
     # → render. (`parse` lives in main()/argparse; the `train?` slot belongs
@@ -176,10 +196,14 @@ def run(args: argparse.Namespace) -> int:
     except NotImplementedError as exc:
         logger.error("%s", exc)
         logger.error("Backend not implemented yet — BMAD Dev phase pending.")
+        if args.dry_run:
+            return _dry_run_without_backend(args, paths, exc)
         _print_report(empty_report(), args.dry_run)
         return 2
     except Exception as exc:  # e.g. TensorFlow missing (NFR-A1)
         logger.error("Failed to initialise backend %r: %s", args.backend, exc)
+        if args.dry_run:
+            return _dry_run_without_backend(args, paths, exc)
         _print_report(empty_report(), args.dry_run)
         return 2
 
