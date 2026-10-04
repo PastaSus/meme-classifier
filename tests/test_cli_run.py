@@ -750,3 +750,151 @@ def test_cli_carries_no_floor_logic() -> None:
             imported.update(alias.name for alias in node.names)
     assert "ACCURACY_FLOOR" not in imported
     assert "UNSORTED_SHARE_FLOOR" not in imported
+
+def _snapshot_tree(root: Path) -> dict[str, bytes]:
+    """Map every file under *root* to its bytes (AC-A10 byte-identity)."""
+    return {
+        str(p.relative_to(root)): p.read_bytes()
+        for p in sorted(root.rglob("*"))
+        if p.is_file()
+    }
+
+
+class _FixedCategoryBackend:
+    """Stub backend: every image goes to one category."""
+
+    def __init__(self, category: str = "cat-memes"):
+        self.category = category
+
+    def load(self):
+        return self
+
+    def predict(self, path):
+        return ClassificationResult(
+            image_path=path, category=self.category, confidence=0.9,
+            backend="stub",
+        )
+
+
+class TestIdempotency:
+    """Story 3.6 (NFR-A3, AC-A10): re-runs change nothing; restores refile."""
+
+    def test_empty_rerun_leaves_tree_byte_identical(
+        self, tmp_path: Path, monkeypatch, capsys
+    ) -> None:
+        inbox = tmp_path / "inbox"
+        inbox.mkdir()
+        for name in ("a.jpg", "b.jpg", "c.jpg"):
+            (inbox / name).write_bytes(b"fake-image-bytes")
+        out = tmp_path / "out"
+        monkeypatch.setattr(
+            cli_mod, "get_classifier",
+            lambda backend, threshold=0.45: _FixedCategoryBackend(),
+        )
+
+        assert run(_args(input_dir=str(inbox), output=str(out))) == 0
+        before = _snapshot_tree(out)
+        assert len(before) == 3  # sanity: the first run filed something
+
+        assert run(_args(input_dir=str(inbox), output=str(out))) == 0
+
+        stdout = capsys.readouterr().out
+        assert "No images found" in stdout
+        assert _snapshot_tree(out) == before
+
+    def test_restored_colliding_files_refile_with_suffix(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        inbox = tmp_path / "inbox"
+        inbox.mkdir()
+        (inbox / "cat.jpg").write_bytes(b"original-bytes")
+        out = tmp_path / "out"
+        monkeypatch.setattr(
+            cli_mod, "get_classifier",
+            lambda backend, threshold=0.45: _FixedCategoryBackend(),
+        )
+
+        assert run(_args(input_dir=str(inbox), output=str(out))) == 0
+        assert (out / "cat-memes" / "cat.jpg").is_file()
+
+        # Restore a copy of the filed image to the inbox and re-run: the
+        # filed original must survive (never overwrite) via suffixing.
+        (inbox / "cat.jpg").write_bytes((out / "cat-memes" / "cat.jpg").read_bytes())
+        assert run(_args(input_dir=str(inbox), output=str(out))) == 0
+
+        first = out / "cat-memes" / "cat.jpg"
+        second = out / "cat-memes" / "cat-1.jpg"
+        assert first.is_file() and second.is_file()
+        assert first.read_bytes() == b"original-bytes"
+        assert second.read_bytes() == b"original-bytes"
+
+    def test_ten_file_dry_run_reports_ten_planned_and_touches_nothing(
+        self, tmp_path: Path, monkeypatch, capsys
+    ) -> None:
+        inbox = tmp_path / "inbox"
+        inbox.mkdir()
+        for index in range(10):
+            (inbox / f"img-{index}.jpg").write_bytes(b"fake-image-bytes")
+        out = tmp_path / "out"
+        before = _snapshot_tree(inbox)
+        monkeypatch.setattr(
+            cli_mod, "get_classifier",
+            lambda backend, threshold=0.45: _FixedCategoryBackend(),
+        )
+
+        assert run(_args(input_dir=str(inbox), output=str(out), dry_run=True)) == 0
+
+        stdout = capsys.readouterr().out
+        assert "planned: 10 | moved: 0" in stdout
+        assert _snapshot_tree(inbox) == before
+        assert not out.exists()
+
+    def test_corrupt_image_real_run_files_unsorted_with_reason(
+        self, tmp_path: Path, monkeypatch, capsys
+    ) -> None:
+        inbox = tmp_path / "inbox"
+        inbox.mkdir()
+        (inbox / "good.jpg").write_bytes(b"fake-image-bytes")
+        (inbox / "corrupt.jpg").write_bytes(b"not-an-image")
+        out = tmp_path / "out"
+
+        class FlakyBackend(_FixedCategoryBackend):
+            def predict(self, path):
+                if Path(path).name == "corrupt.jpg":
+                    raise PredictFailed("cannot decode image")
+                return super().predict(path)
+
+        monkeypatch.setattr(
+            cli_mod, "get_classifier",
+            lambda backend, threshold=0.45: FlakyBackend(),
+        )
+
+        assert run(_args(input_dir=str(inbox), output=str(out))) == 0
+
+        assert (out / "cat-memes" / "good.jpg").is_file()
+        assert (out / "unsorted" / "corrupt.jpg").is_file()
+        stdout = capsys.readouterr().out
+        assert "cannot decode" in stdout
+
+
+def test_cli_module_is_stdlib_only() -> None:
+    """Story 3.6 (AC-A5/NFR-A1): cli.py imports nothing beyond stdlib.
+
+    TensorFlow stays behind classifier.py's lazy import, so the CLI layer
+    loads (and the suite passes) with TensorFlow absent.
+    """
+    import ast
+    import sys
+    from pathlib import Path
+
+    src = Path(cli_mod.__file__).read_text(encoding="utf-8")
+    imported: set[str] = set()
+    for node in ast.walk(ast.parse(src)):
+        if isinstance(node, ast.Import):
+            imported.update(alias.name.split(".")[0] for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            imported.add(node.module.split(".")[0])
+    third_party = (
+        imported - set(sys.stdlib_module_names) - {"classifier", "config", "organizer"}
+    )
+    assert third_party == set(), f"non-stdlib imports: {sorted(third_party)}"

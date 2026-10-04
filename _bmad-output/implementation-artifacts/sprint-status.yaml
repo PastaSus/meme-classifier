@@ -54,7 +54,7 @@ development_status:
   3-3-run-lifecycle-and-exit-codes-fr-a8: review
   3-4-dry-run-that-touches-nothing-fr-a6: done
   3-5-fixture-accuracy-and-calibrated-floors: done
-  3-6-idempotency-and-tf-free-qa-suite-nfr-a1-nfr-a3: backlog
+  3-6-idempotency-and-tf-free-qa-suite-nfr-a1-nfr-a3: review
   epic-3-retrospective: optional
 
   epic-4: backlog
