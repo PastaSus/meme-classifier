@@ -35,7 +35,7 @@ project_key: NOKEY
 tracking_system: file-system
 story_location: _bmad-output/implementation-artifacts
 development_status:
-  epic-1: in-progress
+  epic-1: done
   1-1-provision-the-uv-environment: done
   1-2-establish-config-py-single-source-of-truth: done
   1-3-reconcile-the-cli-surface-to-prd-2-1: done
@@ -57,7 +57,7 @@ development_status:
   3-6-idempotency-and-tf-free-qa-suite-nfr-a1-nfr-a3: done
   epic-3-retrospective: optional
 
-  epic-4: in-progress
+  epic-4: done
   4-1-training-lifecycle-fr-a9: done
   4-2-custom-cnn-backend-via-model-path-fr-a2-nfr-a4: done
   4-3-demo-readiness-and-oq-calibration: done
