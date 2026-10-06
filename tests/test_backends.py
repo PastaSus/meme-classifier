@@ -323,3 +323,103 @@ class TestThresholdRouting:
             "unsorted",
             "confidence 0.10 < 0.45",
         )
+
+
+class TestPhase5Hardening:
+    """Adversarial review (Phase 5): invalid confidences, threshold shape,
+    TF-free load failures, and the decode pixel cap."""
+
+    @pytest.mark.parametrize("bad", [float("nan"), None, -0.1, 1.5, "high"])
+    def test_invalid_confidence_routes_to_unsorted(self, bad) -> None:
+        # NaN previously bypassed the `< threshold` comparison into a real
+        # category; non-numeric/out-of-range values must never satisfy it.
+        final, reason = _StubBackend().route("cat-memes", bad)
+        assert final == "unsorted"
+        assert reason is not None
+
+    @pytest.mark.parametrize("bad", [-0.5, 1.5, float("nan"), "0.5", None])
+    def test_backend_rejects_invalid_threshold(self, bad) -> None:
+        with pytest.raises(ValueError, match="threshold"):
+            _StubBackend(threshold=bad)
+
+    @pytest.mark.parametrize("good", [0.0, 0.45, 1.0])
+    def test_backend_accepts_zero_to_one_threshold(self, good: float) -> None:
+        # 0.0 is the deliberate library-level "disable the safety net" hatch
+        # (see TestCustomCNNTF.test_zero_threshold_never_routes_to_unsorted).
+        assert _StubBackend(threshold=good).threshold == good
+
+    def test_mobilenet_load_without_tensorflow_is_unavailable(
+        self, monkeypatch
+    ) -> None:
+        """TF-free by construction: a broken TF import must surface as
+        BackendUnavailable (cli exit 2), never a traceback."""
+        import builtins
+
+        real_import = builtins.__import__
+
+        def boom(name, *args, **kwargs):
+            if name == "tensorflow":
+                raise ImportError("No module named 'tensorflow'")
+            return real_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", boom)
+        with pytest.raises(BackendUnavailable, match="unavailable"):
+            MobileNetV2Classifier().load()
+
+    def test_non_five_wide_artifact_rejected_without_tensorflow(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """The 5-wide shape check must hold even where TF is absent, via a
+        stubbed tensorflow module (the file check is stdlib and runs first)."""
+        import sys
+        import types
+
+        bad = tmp_path / "binary.keras"
+        bad.write_bytes(b"fake-keras-bytes")
+        fake_model = types.SimpleNamespace(output_shape=(None, 1))
+        fake_tf = types.SimpleNamespace(
+            keras=types.SimpleNamespace(
+                models=types.SimpleNamespace(
+                    load_model=lambda *args, **kwargs: fake_model
+                )
+            )
+        )
+        monkeypatch.setitem(sys.modules, "tensorflow", fake_tf)
+        with pytest.raises(BackendUnavailable, match="outputs"):
+            CustomCNNClassifier(bad).load()
+
+    def test_malformed_artifact_without_output_shape_is_unavailable(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """Phase 5: shape inspection lives inside the guarded load, so a
+        non-model artifact maps to BackendUnavailable instead of leaking
+        AttributeError."""
+        import sys
+        import types
+
+        bad = tmp_path / "weird.keras"
+        bad.write_bytes(b"fake-keras-bytes")
+        fake_tf = types.SimpleNamespace(
+            keras=types.SimpleNamespace(
+                models=types.SimpleNamespace(
+                    load_model=lambda *args, **kwargs: types.SimpleNamespace()
+                )
+            )
+        )
+        monkeypatch.setitem(sys.modules, "tensorflow", fake_tf)
+        with pytest.raises(BackendUnavailable, match="load failed"):
+            CustomCNNClassifier(bad).load()
+
+
+@needs_tf
+class TestPixelCapTF:
+    """Phase 5: decoding is capped before any pixel buffer is allocated."""
+
+    def test_oversized_image_raises_stable_failure(
+        self, mobilenet: MobileNetV2Classifier, tmp_path: Path, monkeypatch
+    ) -> None:
+        import classifier as classifier_mod
+
+        monkeypatch.setattr(classifier_mod, "_MAX_IMAGE_PIXELS", 100)
+        with pytest.raises(PredictFailed, match="too large"):
+            mobilenet.predict(_image(tmp_path / "big.png", (1, 2, 3)))

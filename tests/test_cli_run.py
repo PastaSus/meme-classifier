@@ -58,6 +58,40 @@ class TestPathValidation:
         assert "No images found" in capsys.readouterr().out
         assert not (tmp_path / "out").exists()
 
+    def test_blank_input_dir_exits_1_without_scanning_cwd(
+        self, tmp_path: Path, capsys, monkeypatch
+    ) -> None:
+        """Phase 5: Path("") resolves to "." — a blank input must fail loudly
+        instead of scanning the caller's working directory."""
+        out = tmp_path / "out"
+
+        def fail_on_scan(*args, **kwargs):
+            raise AssertionError("scan must not run for a blank input dir")
+
+        monkeypatch.setattr(cli_mod, "scan_images", fail_on_scan)
+
+        assert run(_args(input_dir="", output=str(out))) == 1
+        assert "Nothing to organize." in capsys.readouterr().out
+        assert not out.exists()
+
+    def test_blank_output_exits_1(self, tmp_path: Path, capsys) -> None:
+        inbox = tmp_path / "inbox"
+        inbox.mkdir()
+
+        assert run(_args(input_dir=str(inbox), output="  ")) == 1
+        assert "Nothing to organize." in capsys.readouterr().out
+
+    def test_input_equal_to_output_exits_1(self, tmp_path: Path, capsys) -> None:
+        """Phase 5: scanning a tree that excludes itself would report a silent
+        no-op with exit 0 — fail loudly instead."""
+        inbox = tmp_path / "inbox"
+        inbox.mkdir()
+        (inbox / "meme.jpg").write_bytes(b"fake-image-bytes")
+
+        assert run(_args(input_dir=str(inbox), output=str(inbox))) == 1
+        assert "Nothing to organize." in capsys.readouterr().out
+        assert (inbox / "meme.jpg").is_file()
+
 
 class TestScanWiring:
     def test_recursive_flag_forwarded_to_scan(self, tmp_path: Path, monkeypatch) -> None:
@@ -358,7 +392,11 @@ class TestLifecycleAndExitCodes:
 
     @pytest.mark.parametrize(
         "error",
-        [BackendUnavailable("TensorFlow unavailable"), NotImplementedError("todo")],
+        [
+            BackendUnavailable("TensorFlow unavailable"),
+            NotImplementedError("todo"),
+            RuntimeError("boom"),
+        ],
     )
     def test_backend_down_non_dry_exits_2_with_report_and_no_moves(
         self, tmp_path: Path, monkeypatch, capsys, error: Exception
@@ -388,7 +426,11 @@ class TestLifecycleAndExitCodes:
 
     @pytest.mark.parametrize(
         "error",
-        [BackendUnavailable("TensorFlow unavailable"), NotImplementedError("todo")],
+        [
+            BackendUnavailable("TensorFlow unavailable"),
+            NotImplementedError("todo"),
+            RuntimeError("boom"),
+        ],
     )
     def test_backend_down_dry_run_plans_unsorted_and_exits_0(
         self, tmp_path: Path, monkeypatch, capsys, error: Exception
@@ -590,6 +632,37 @@ class TestFixtureWiring:
                 fixture=str(missing_default),
             )
         )
+
+        assert code == 0
+        stdout = capsys.readouterr().out
+        assert "Fixture accuracy" not in stdout
+        assert (out / "cat-memes" / "meme.jpg").is_file()
+
+    def test_empty_string_fixture_is_silently_skipped(
+        self, tmp_path: Path, monkeypatch, capsys
+    ) -> None:
+        """Phase 5: fixture="" opts out of accuracy (Path("") would resolve to
+        the CWD) — the run still files images normally."""
+        inbox = tmp_path / "inbox"
+        inbox.mkdir()
+        (inbox / "meme.jpg").write_bytes(b"fake-image-bytes")
+        out = tmp_path / "out"
+
+        class StubBackend:
+            def load(self):
+                return self
+
+            def predict(self, path):
+                return ClassificationResult(
+                    image_path=path, category="cat-memes", confidence=0.9,
+                    backend="stub",
+                )
+
+        monkeypatch.setattr(
+            cli_mod, "get_classifier", lambda backend, threshold=0.45, model_path=None: StubBackend()
+        )
+
+        code = run(_args(input_dir=str(inbox), output=str(out), fixture=""))
 
         assert code == 0
         stdout = capsys.readouterr().out

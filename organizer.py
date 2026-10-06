@@ -207,6 +207,8 @@ def sanitize_category(category: str, allowed: Collection[str] | None = None) -> 
     labels, empty strings, ...).
     """
     allowed_set = set(CATEGORIES if allowed is None else allowed)
+    if not isinstance(category, str):
+        raise ValueError(f"Category not allowed: {category!r}")
     cleaned = re.sub(r"[\s_]+", "-", category.strip().lower())
     cleaned = re.sub(r"[^a-z0-9-]", "", cleaned)
     if not cleaned or cleaned in {".", ".."} or cleaned not in allowed_set:
@@ -222,6 +224,15 @@ def unique_destination(
     *reserved* holds already-planned paths that do not exist on disk yet (the
     dry-run virtual tree, FR-A6) — they count as taken alongside real files.
     """
+    if (
+        not isinstance(filename, str)
+        or not filename
+        or filename in {".", ".."}
+        or Path(filename).name != filename
+    ):
+        # Phase 5 (NFR-A2): a separator-carrying filename would escape
+        # *directory* via ``directory / filename`` — refuse instead.
+        raise ValueError(f"Unsafe filename: {filename!r}")
     taken = set(reserved) if reserved else set()
     candidate = directory / filename
     if not candidate.exists() and candidate not in taken:
@@ -283,7 +294,22 @@ def organize(
             expected = {}
 
     for job in jobs:
-        source = Path(job.source)
+        try:
+            source = Path(job.source)
+        except TypeError as exc:
+            # Phase 5: a non-pathlike source must not abort the batch.
+            report.records.append(
+                MoveRecord(
+                    Path("<invalid-source>"),
+                    None,
+                    "unsorted",
+                    0.0,
+                    STATUS_SKIPPED,
+                    f"invalid source: {exc}",
+                )
+            )
+            logger.warning("Skipped job with invalid source: %s", exc)
+            continue
         detail = job.reason or ""
         try:
             category = sanitize_category(job.category, allowed)

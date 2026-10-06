@@ -241,12 +241,27 @@ def run(args: argparse.Namespace) -> int:
         return _run_train(args, Path(str(train_raw)))
 
     input_dir = Path(args.input_dir)
+    output = Path(args.output)
+    if not str(args.input_dir).strip() or not str(args.output).strip():
+        # Phase 5: Path("") resolves to "." — an explicit blank would scan
+        # the caller's working directory instead of failing loudly.
+        logger.error("Input and output directories must not be blank")
+        _print_report(empty_report(), args.dry_run)
+        return 1
     if not input_dir.is_dir():
         logger.error("Input directory does not exist: %s", input_dir.resolve())
         _print_report(empty_report(), args.dry_run)
         return 1
 
-    output = Path(args.output)
+    if input_dir.resolve() == output.resolve():
+        # Scanning a tree that excludes itself reports "No images found"
+        # with exit 0 — fail loudly instead of a silent no-op.
+        logger.error(
+            "Input and output directories must differ: %s", input_dir.resolve()
+        )
+        _print_report(empty_report(), args.dry_run)
+        return 1
+
     if output.exists() and not output.is_dir():
         logger.error("Output path is not a directory: %s", output.resolve())
         _print_report(empty_report(), args.dry_run)

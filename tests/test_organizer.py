@@ -40,6 +40,14 @@ class TestScanImages:
 
         assert [p.name for p in found] == ["a.jpg", "b.PNG"]
 
+    def test_skips_dotfile_with_image_suffix(self, tmp_path: Path) -> None:
+        """Phase 5: a top-level dotfile (e.g. `.secret.jpg`) is hidden and
+        must not reach classification."""
+        _touch(tmp_path / "a.jpg")
+        _touch(tmp_path / ".secret.jpg")
+
+        assert [p.name for p in scan_images(tmp_path)] == ["a.jpg"]
+
     def test_recursion_is_off_by_default(self, tmp_path: Path) -> None:
         inbox = tmp_path / "inbox"
         _touch(inbox / "top.jpg")
@@ -72,7 +80,7 @@ class TestSanitizeCategory:
         assert sanitize_category("Cat Memes") == "cat-memes"
         assert sanitize_category("CHAOTIC_SCREENSHOTS") == "chaotic-screenshots"
 
-    @pytest.mark.parametrize("bad", ["../etc", "", "..", "not-a-category", "a/b"])
+    @pytest.mark.parametrize("bad", ["../etc", "", "..", "not-a-category", "a/b", None])
     def test_rejects_disallowed(self, bad: str) -> None:
         with pytest.raises(ValueError):
             sanitize_category(bad)
@@ -99,6 +107,15 @@ class TestUniqueDestination:
         _touch(tmp_path / "README")
         assert unique_destination(tmp_path, "README") == tmp_path / "README-1"
 
+    @pytest.mark.parametrize("bad", ["../evil.jpg", "a/b.jpg", "", ".", ".."])
+    def test_rejects_separator_carrying_filenames(
+        self, tmp_path: Path, bad: str
+    ) -> None:
+        """Phase 5 (NFR-A2): `directory / filename` with separators would
+        escape the category folder — refuse instead of joining."""
+        with pytest.raises(ValueError, match="Unsafe filename"):
+            unique_destination(tmp_path, bad)
+
 
 class TestOrganize:
     def test_moves_into_labelled_subfolder(self, tmp_path: Path) -> None:
@@ -113,6 +130,27 @@ class TestOrganize:
         assert (out / "cat-memes" / "cat.jpg").is_file()
         assert not src.exists()
         assert report.records[0].status == STATUS_MOVED
+
+    def test_none_source_is_skipped_without_aborting_batch(
+        self, tmp_path: Path
+    ) -> None:
+        """Phase 5: a non-pathlike source records skipped; later jobs still run."""
+        src = _touch(tmp_path / "inbox" / "cat.jpg")
+        out = tmp_path / "organized"
+
+        report = organize(
+            [
+                OrganizeJob(None, "cat-memes", 0.9),
+                OrganizeJob(src, "cat-memes", 0.9),
+            ],
+            out,
+            allowed=CATEGORIES,
+        )
+
+        assert report.moved == 1
+        assert report.skipped == 1
+        assert report.records[0].status == STATUS_SKIPPED
+        assert (out / "cat-memes" / "cat.jpg").is_file()
 
     def test_dry_run_touches_nothing(self, tmp_path: Path) -> None:
         src = _touch(tmp_path / "inbox" / "gym.jpg")
