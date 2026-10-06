@@ -89,6 +89,20 @@ context: []
 - `low → rejected` — OQ sign-off lacks a Tech Lead name: single-human project, decision captured in-session with date + rationale; authorship traceable via session and git history.
 - `low → patched` — manual demo runs unreproducible: host re-ran all three paths and recorded exact commands + outcomes above.
 
+### Review Findings (code review 2026-10-06; layers: blind-hunter, edge-case-hunter, verification-gap, acceptance-auditor)
+
+- [x] [Review][Decision] Spec header says done, tracker says review — spec line 5 `status: 'done'` vs `sprint-status.yaml` `4-3: review` / `epic-4: in-progress`. Close-out call needed: mark story `done` now, or keep open. → Resolved 2026-10-06: marked done (no high/medium blockers).
+- [x] [Review][Patch] bmad-plan Phase 4 marked Done while 4-3 still in review [docs/bmad-plan.md:32-34] → Resolved 2026-10-06 by close-out; statement now true, no edit needed.
+- [x] [Review][Patch] README Tests section has bare command only, no count/timing to match AGENTS.md [README.md:73-78] → Applied 2026-10-06.
+- [x] [Review][Defer] Defense-facing doc completeness (mapping-table location, MobileNet weight source/offline behavior, threshold value in arch/data README) [docs/system-architecture.md, data/README.md] — deferred: Phase 6 owns defense-facing completeness (demo script + Q&A sheet).
+
+Rejected:
+- `false` — .gitignore `models/` unanchored / `*.h5` missing: the tool only ever writes one `.keras` path (`train_labeled_model` tmp+replace); no stray artifact can occur.
+- `rejected` — spec Change Log empty / no AC→test table: fix would edit the spec under review; coverage is enumerated in Implementation Notes.
+- `rejected` — manual-run logs/versions not retained: fix would edit the spec under review; commands + outcomes + dates recorded, TF pinned in PRD NFR-A5.
+- `false` — OQ-1 floors comment-only guard / no follow-up ticket: keeping first-pass values with pending-real-data rationale was the explicit human OQ-1 decision, recorded in spec + PRD §2.6.
+- `false` — AGENTS.md two-line change vs one-line charter: both hunks are truthful updates (test count 17→158 recorded in Implementation Notes); no restructuring occurred.
+
 ## Verification
 
 **Commands:**
