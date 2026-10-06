@@ -15,6 +15,7 @@ five-element distribution over ``config.CATEGORIES``.
 from __future__ import annotations
 
 import logging
+import math
 import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -31,9 +32,45 @@ from config import (
 
 logger = logging.getLogger(__name__)
 
+# Phase 5 hardening: refuse to decode images above this pixel count before
+# any pixel buffer is allocated (decompression-bomb guard). 50 MP sits far
+# above any real meme/screenshot yet far below OOM territory at 224/64px
+# working sizes; violations surface as PredictFailed -> unsorted + reason.
+_MAX_IMAGE_PIXELS = 50_000_000
+
 
 class BackendUnavailable(Exception):
     """Raised when a backend cannot serve (unknown name, TF missing, load fail)."""
+
+
+def _load_pixels(path: Path, size: int):
+    """Open *path*, enforce the pixel-count cap, return a float32 RGB array.
+
+    Phase 5: the ``width * height`` check runs before any pixel buffer is
+    allocated, so a decompression bomb fails here instead of OOMing the
+    batch. Oversized, truncated, and unreadable images all surface as
+    ``PredictFailed`` so callers convert uniformly to unsorted + reason.
+    """
+    try:
+        import numpy as np
+        from PIL import Image
+    except Exception as exc:
+        raise PredictFailed(f"image dependencies unavailable: {exc}") from exc
+    try:
+        with Image.open(path) as img:
+            width, height = img.size
+            if width * height > _MAX_IMAGE_PIXELS:
+                raise PredictFailed(
+                    f"image too large ({width}x{height} pixels): {path.name}"
+                )
+            arr = np.asarray(
+                img.convert("RGB").resize((size, size)), dtype=np.float32
+            )
+    except PredictFailed:
+        raise
+    except Exception as exc:
+        raise PredictFailed(f"unreadable image {path.name}: {exc}") from exc
+    return arr
 
 
 class PredictFailed(Exception):
@@ -60,7 +97,15 @@ class BaseClassifier(ABC):
 
     def __init__(self, threshold: float = CONFIDENCE_THRESHOLD) -> None:
         """*threshold* is the below-which probability that means `unsorted` (FR-A3)."""
-        self.threshold = threshold
+        if (
+            not isinstance(threshold, (int, float))
+            or not math.isfinite(threshold)
+            or not 0 <= float(threshold) <= 1
+        ):
+            raise ValueError(
+                f"threshold must be in [0, 1], got {threshold!r}"
+            )
+        self.threshold = float(threshold)
 
     @abstractmethod
     def load(self) -> "BaseClassifier":
@@ -80,8 +125,15 @@ class BaseClassifier(ABC):
         ``(final_category, reason)``: unmapped labels route to ``unsorted``
         regardless of confidence; below-threshold confidences route to
         ``unsorted`` with a ``confidence X < Y`` reason; categories outside
-        ``config.CATEGORIES`` are normalized to ``unsorted``.
+        ``config.CATEGORIES`` are normalized to ``unsorted``. Non-finite or
+        out-of-range confidences (NaN/None/<0/>1) can never satisfy the
+        threshold comparison, so they route to ``unsorted`` outright.
         """
+        if not isinstance(confidence, (int, float)) or not math.isfinite(confidence):
+            return "unsorted", f"invalid confidence {confidence!r}"
+        confidence = float(confidence)
+        if not 0.0 <= confidence <= 1.0:
+            return "unsorted", f"confidence out of range {confidence!r}"
         if category is None:
             return "unsorted", f"unmapped label {raw_label!r}"
         if confidence < self.threshold:
@@ -136,19 +188,10 @@ class MobileNetV2Classifier(BaseClassifier):
         path = Path(image_path)
         if self._model is None or self._preprocess is None or self._decode is None:
             raise PredictFailed("mobilenet backend not loaded (call load() first)")
+        arr = _load_pixels(path, 224)
         try:
             import numpy as np
-            from PIL import Image
-        except Exception as exc:
-            raise PredictFailed(f"image dependencies unavailable: {exc}") from exc
-        try:
-            with Image.open(path) as img:
-                arr = np.asarray(
-                    img.convert("RGB").resize((224, 224)), dtype=np.float32
-                )
-        except Exception as exc:
-            raise PredictFailed(f"unreadable image {path.name}: {exc}") from exc
-        try:
+
             batch = self._preprocess(np.expand_dims(arr, 0))
             preds = self._model.predict(batch, verbose=0)
             decoded = self._decode(preds, top=1)[0][0]
@@ -213,11 +256,12 @@ class CustomCNNClassifier(BaseClassifier):
             raise BackendUnavailable(f"TensorFlow unavailable: {exc}") from exc
         try:
             self._model = keras.models.load_model(str(self.model_path))
+            width = self._model.output_shape[-1]
         except Exception as exc:
+            self._model = None
             raise BackendUnavailable(
                 f"custom-cnn load failed for {self.model_path}: {exc}"
             ) from exc
-        width = self._model.output_shape[-1]
         if width != len(CATEGORIES):
             self._model = None
             raise BackendUnavailable(
@@ -231,22 +275,10 @@ class CustomCNNClassifier(BaseClassifier):
         path = Path(image_path)
         if self._model is None:
             raise PredictFailed("custom-cnn backend not loaded (call load() first)")
+        arr = _load_pixels(path, _TRAIN_IMAGE_SIZE)
         try:
             import numpy as np
-            from PIL import Image
-        except Exception as exc:
-            raise PredictFailed(f"image dependencies unavailable: {exc}") from exc
-        try:
-            with Image.open(path) as img:
-                arr = np.asarray(
-                    img.convert("RGB").resize(
-                        (_TRAIN_IMAGE_SIZE, _TRAIN_IMAGE_SIZE)
-                    ),
-                    dtype=np.float32,
-                )
-        except Exception as exc:
-            raise PredictFailed(f"unreadable image {path.name}: {exc}") from exc
-        try:
+
             probs = self._model.predict(
                 np.expand_dims(arr / 255.0, 0), verbose=0
             )[0]
@@ -342,6 +374,11 @@ def train_labeled_model(
             f"Training dependencies unavailable: {exc}"
         ) from exc
 
+    # Phase 5: data preparation and TF fit/save run in separate buckets so a
+    # TensorFlow-raised ValueError (bad shapes, failed fit) maps to exit 2
+    # (BackendUnavailable), while empty/unreadable data stays ValueError
+    # (exit 1). Previously one try-block re-raised every ValueError as a
+    # data error, misreporting model failures.
     try:
         images: list = []
         labels: list[int] = []
@@ -365,7 +402,14 @@ def train_labeled_model(
             raise ValueError(f"No readable training images under {root_path}")
         X = np.stack(images).astype(np.float32)
         y = np.eye(len(CATEGORIES), dtype=np.float32)[np.asarray(labels)]
+    except (ValueError, BackendUnavailable):
+        raise
+    except Exception as exc:
+        raise BackendUnavailable(
+            f"Training data preparation failed: {exc}"
+        ) from exc
 
+    try:
         model = keras.Sequential(
             [
                 keras.layers.Input(
@@ -402,8 +446,10 @@ def train_labeled_model(
             except OSError:
                 pass
             raise
-    except ValueError:
-        raise
+    except ValueError as exc:
+        # A TF-stage ValueError (fit/save) is a model failure, not a data
+        # error — cli must report exit 2, not exit 1.
+        raise BackendUnavailable(f"Training failed: {exc}") from exc
     except BackendUnavailable:
         raise
     except Exception as exc:

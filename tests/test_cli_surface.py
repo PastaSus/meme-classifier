@@ -73,3 +73,29 @@ class TestFrozenSurface:
         assert MODEL_BACKENDS == ("mobilenet", "custom-cnn")
         with pytest.raises(SystemExit):
             build_parser().parse_args(["-b", "yolo"])
+
+
+class TestMainEntry:
+    """Phase 5: the documented `py main.py ...` entry point is wired.
+
+    TF-free: an empty inbox returns before any backend loads (NFR-A1)."""
+
+    def test_main_py_dry_run_on_empty_inbox_exits_0(self, tmp_path) -> None:
+        import subprocess
+        import sys
+        from pathlib import Path
+
+        project_root = Path(__file__).resolve().parents[1]
+        inbox = tmp_path / "inbox"
+        inbox.mkdir()
+
+        proc = subprocess.run(
+            [sys.executable, "main.py", str(inbox), "--dry-run"],
+            cwd=project_root,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+
+        assert proc.returncode == 0
+        assert "No images found" in proc.stdout
