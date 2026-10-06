@@ -3,6 +3,9 @@
 - **`inbox/`** — drop unorganized meme/reaction images here (or pass any folder as the CLI's
   first positional argument). Nested subfolders are scanned only with `-r`/`--recursive`
   (recursion is off by default).
+- **`demo-labeled/`** — 9 sample memes pre-sorted into 4 category folders for the live
+  `--train` demo (the same files as `inbox/`, minus the 2 unlabelled extras). Never
+  run inference directly on this tree (it would drain it) — copy it first.
 - **`organized/`** — created automatically; each run files images into labelled subfolders:
 
   ```
