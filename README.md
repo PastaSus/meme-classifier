@@ -74,5 +74,5 @@ meme-classifier/
 
 ```bash
 cd meme-classifier
-uv run --with pytest pytest -q
+uv run --with pytest pytest -q   # 158 tests, ~15s
 ```
