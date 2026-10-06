@@ -31,7 +31,7 @@ The Tech Lead (human-directed) orchestrates phase transitions and owns `PROMPTS_
 | 2 | System design | Architect Agent | Architecture doc + module contracts | **Done** (INIT-001 output) |
 | 4 | Implementation — meme-classifier | Dev Agent | MobileNetV2 + custom CNN organizer (+ `--train` lifecycle) | Done (Stories 4.1/4.2; 4.3 closes docs + demo verification) |
 | 5 | Adversarial review | QA Agent | Edge-case tests, review fixes, security pass | Done (3-lens review; 9 fixes + 32 regression tests, suite 190 green) |
-| 6 | Defense prep | QA Agent | Demo script, professor Q&A sheet | In progress (Story 4.3: demo paths verified, OQ-1/OQ-2 recorded) |
+| 6 | Defense prep | QA Agent | Demo script, professor Q&A sheet | Done (`docs/demo-script.md` + `docs/professor-qa.md`, outputs verified 2026-10-06) |
 
 > Phase **3** (Implementation — spam-detector) belongs to the sibling project and is tracked in
 > `spam-detector/docs/bmad-plan.md`.
